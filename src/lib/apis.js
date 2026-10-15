@@ -315,3 +315,116 @@ export async function findCover(title, author, { signal } = {}) {
   }
   return null;
 }
+
+/* ------------------------------------------------------------------ */
+/* Book insights (Open Library): reading stats, legal ways to read,     */
+/* reader lists, subjects and similar books.                            */
+
+const INSIGHT_FIELDS = [
+  'key', 'title', 'author_name', 'cover_i', 'first_publish_year', 'edition_count', 'number_of_pages_median',
+  'ratings_average', 'ratings_count', 'want_to_read_count', 'currently_reading_count', 'already_read_count',
+  'ebook_access', 'ia', 'lending_edition_s', 'id_project_gutenberg', 'subject', 'person', 'place', 'time',
+].join(',');
+
+// Subjects that are catalogue housekeeping rather than what the book is about.
+const NOISE_SUBJECT = /^(accessible book|protected daisy|in library|lending library|large type books|open_syllabus_project|internet archive wishlist|overdrive|nyt:|award:|great_books_of_the_western_world|fiction$|literature$|general$|translations into|reading level|textbooks|ficção$|romance$|english language)/i;
+
+// Subjects that record a recommendation or distinction.
+function recognitionsFrom(subjects) {
+  const out = [];
+  for (const s of subjects || []) {
+    if (s === 'great_books_of_the_western_world') out.push('Coleção Great Books of the Western World, da Encyclopaedia Britannica');
+    else if (/^nyt:/i.test(s) || /new york times best/i.test(s)) out.push('Lista de mais vendidos do New York Times');
+    else if (/^open_syllabus_project$/i.test(s)) out.push('Indicado em programas de cursos universitários (Open Syllabus)');
+    else {
+      const m = /^award:([^=]+)(?:=(.+))?$/i.exec(s);
+      if (m) out.push('Prêmio ' + m[1].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) + (m[2] ? ` (${m[2]})` : ''));
+    }
+  }
+  return [...new Set(out)];
+}
+
+// Reader lists whose names suggest a recommendation, not a private shelf.
+const NOTABLE_LIST = /(1001|must.?read|best|great|classic|cl[aá]ssic|essential|essenc|melhores|canon|c[aâ]non|top\s?\d|prize|award|pr[eê]mio|recomend|recommend|vestibular|fuvest|enem|leitura obrigat)/i;
+
+const titleKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
+
+export async function bookInsights(book, { signal } = {}) {
+  const author = (book.authors || [])[0] || '';
+  const q = book.isbn ? 'isbn:' + cleanIsbn(book.isbn) : `${book.title} ${author}`.trim();
+  return cached('ins:' + q, async () => {
+    await olThrottle();
+    const params = new URLSearchParams({ q, limit: '5', fields: INSIGHT_FIELDS });
+    const data = await getJson(OL + '/search.json?' + params, { signal, timeout: 15000 });
+    const docs = (data && data.docs) || [];
+    const want = titleKey(book.title);
+    const doc = docs.find((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); }) || docs[0];
+    if (!doc) return null;
+
+    const subjects = doc.subject || [];
+    const ia = (doc.ia || []).find((id) => !/^lp_/.test(id)) || (doc.ia || [])[0] || '';
+    const read = [];
+    if (doc.ebook_access === 'public' && ia) read.push({ kind: 'download', label: 'Ler ou baixar no Internet Archive', note: 'Edição digital em domínio público: PDF, EPUB e leitura online.', url: `https://archive.org/details/${ia}` });
+    (doc.id_project_gutenberg || []).slice(0, 1).forEach((id) => read.push({ kind: 'download', label: 'Baixar no Projeto Gutenberg', note: 'EPUB, Kindle e texto, grátis e legal (domínio público).', url: `https://www.gutenberg.org/ebooks/${id}` }));
+    if (doc.ebook_access === 'borrowable' && doc.lending_edition_s) read.push({ kind: 'borrow', label: 'Pegar emprestado na Open Library', note: 'Empréstimo digital gratuito por tempo limitado, com conta na Open Library.', url: `${OL}/books/${doc.lending_edition_s}` });
+    if (doc.key) read.push({ kind: 'info', label: 'Ver todas as edições na Open Library', note: `${doc.edition_count || 'Várias'} edições cadastradas, em vários idiomas.`, url: OL + doc.key });
+
+    let lists = { total: 0, notable: [] };
+    if (doc.key) {
+      try {
+        await olThrottle();
+        const l = await getJson(`${OL}${doc.key}/lists.json?limit=100`, { signal, timeout: 15000 });
+        const entries = (l && l.entries) || [];
+        lists = {
+          total: (l && l.size) || entries.length,
+          notable: entries.filter((e) => e.name && NOTABLE_LIST.test(e.name)).slice(0, 6).map((e) => ({ name: e.name.trim(), url: OL + e.url, count: e.seed_count || 0 })),
+        };
+      } catch (e) { /* lists are optional */ }
+    }
+
+    const authorName = (doc.author_name || [])[0] || author;
+    return {
+      key: doc.key || '',
+      title: doc.title,
+      firstYear: doc.first_publish_year || null,
+      editions: doc.edition_count || 0,
+      pages: doc.number_of_pages_median || 0,
+      rating: doc.ratings_average ? Math.round(doc.ratings_average * 10) / 10 : null,
+      ratingCount: doc.ratings_count || 0,
+      want: doc.want_to_read_count || 0,
+      reading: doc.currently_reading_count || 0,
+      readCount: doc.already_read_count || 0,
+      read,
+      lists,
+      recognitions: recognitionsFrom(subjects),
+      subjects: subjects.filter((s) => !NOISE_SUBJECT.test(s) && s.length < 60).slice(0, 14),
+      people: (doc.person || []).filter((p) => !p.includes(authorName.split(' ').pop() || '§')).slice(0, 10),
+      places: (doc.place || []).slice(0, 8),
+      times: (doc.time || []).slice(0, 4),
+      goodreads: `https://www.goodreads.com/search?q=${encodeURIComponent(`${book.title} ${author}`)}`,
+      wikipedia: `https://pt.wikipedia.org/w/index.php?search=${encodeURIComponent(book.title + ' ' + author)}`,
+    };
+  });
+}
+
+/** Books that share the main subject (Open Library subjects API). */
+export async function similarBooks(subject, excludeKey, { signal } = {}) {
+  if (!subject) return [];
+  const slug = subject.toLowerCase().replace(/[^a-z0-9À-ɏ]+/gi, '_').replace(/^_|_$/g, '');
+  return cached('sim:' + slug, async () => {
+    await olThrottle();
+    const data = await getJson(`${OL}/subjects/${encodeURIComponent(slug)}.json?limit=18`, { signal, timeout: 15000 });
+    return ((data && data.works) || [])
+      .filter((w) => w.key !== excludeKey && w.cover_id)
+      .slice(0, 8)
+      .map((w) => ({
+        key: w.key,
+        title: w.title,
+        authors: (w.authors || []).map((a) => a.name),
+        year: w.first_publish_year ? String(w.first_publish_year) : '',
+        cover: olCoverById(w.cover_id, 'M'),
+        coverLarge: olCoverById(w.cover_id, 'L'),
+        link: OL + w.key,
+      }));
+  });
+}

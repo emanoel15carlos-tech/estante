@@ -79,20 +79,71 @@ export function drawCover(book, w = 512, h = 768) {
   return c;
 }
 
-/** Spine drawn on a canvas, title reading bottom to top. */
-export function drawSpine(book, w, h = 512) {
+function splitTwo(ctx, text) {
+  const words = String(text).split(' ');
+  if (words.length < 2) return [text];
+  let best = null;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' '), b = words.slice(i).join(' ');
+    const wMax = Math.max(ctx.measureText(a).width, ctx.measureText(b).width);
+    if (!best || wMax < best.w) best = { w: wMax, lines: [a, b] };
+  }
+  return best.lines;
+}
+
+/**
+ * Spine drawn on a canvas: title reading bottom to top (one or two lines),
+ * author's surname near the foot, bands at both ends. w × h in pixels.
+ */
+export function drawSpine(book, w, h = 1024) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const x = c.getContext('2d');
   x.fillStyle = book.color; x.fillRect(0, 0, w, h);
-  x.fillStyle = book.ink; x.globalAlpha = 0.35;
-  x.fillRect(6, 26, w - 12, 3); x.fillRect(6, h - 32, w - 12, 3);
+  // Bands
+  x.fillStyle = book.ink; x.globalAlpha = 0.38;
+  x.fillRect(w * 0.08, h * 0.045, w * 0.84, Math.max(3, h * 0.005));
+  x.fillRect(w * 0.08, h * 0.062, w * 0.84, Math.max(2, h * 0.0025));
+  x.fillRect(w * 0.08, h * 0.935, w * 0.84, Math.max(2, h * 0.0025));
+  x.fillRect(w * 0.08, h * 0.95, w * 0.84, Math.max(3, h * 0.005));
   x.globalAlpha = 1;
-  x.save(); x.translate(w / 2, h / 2); x.rotate(-Math.PI / 2);
-  x.textAlign = 'center'; x.textBaseline = 'middle';
+
+  x.save();
+  x.translate(w / 2, h / 2);
+  x.rotate(-Math.PI / 2); // +x now runs up the spine
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillStyle = book.ink;
+
+  const room = h * 0.6; // length available to the title
+  const centre = h * 0.07; // title sits a little above the middle; author goes below
   let size = Math.round(w * 0.42);
-  do { x.font = `600 ${size}px ${FRAUNCES}`; size--; } while (x.measureText(book.title).width > h - 90 && size > 8);
-  x.fillText(book.title, 0, 2);
+  const min = Math.round(w * 0.24);
+  x.font = `600 ${size}px ${FRAUNCES}`;
+  while (x.measureText(book.title).width > room && size > min) { size -= 1; x.font = `600 ${size}px ${FRAUNCES}`; }
+  if (x.measureText(book.title).width <= room) {
+    x.fillText(book.title, centre, 0);
+  } else {
+    // Two lines across the spine's width.
+    size = Math.round(w * 0.27);
+    x.font = `600 ${size}px ${FRAUNCES}`;
+    let lines = splitTwo(x, book.title);
+    while (Math.max(...lines.map((l) => x.measureText(l).width)) > room && size > 10) {
+      size -= 1; x.font = `600 ${size}px ${FRAUNCES}`; lines = splitTwo(x, book.title);
+    }
+    const gap = size * 0.58;
+    x.fillText(lines[0], centre, -gap);
+    if (lines[1]) x.fillText(lines[1], centre, gap);
+  }
+
+  const author = String((book.authors || [])[0] || '').split(' ').filter(Boolean).pop() || '';
+  if (author) {
+    let as = Math.round(w * 0.2);
+    x.font = `500 ${as}px ${FIGTREE}`;
+    while (x.measureText(author.toUpperCase()).width > h * 0.2 && as > 8) { as -= 1; x.font = `500 ${as}px ${FIGTREE}`; }
+    x.globalAlpha = 0.8;
+    x.fillText(author.toUpperCase(), -h * 0.36, 0);
+  }
   x.restore();
   return c;
 }

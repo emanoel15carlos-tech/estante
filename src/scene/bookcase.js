@@ -4,7 +4,25 @@ import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { drawCover, drawSpine, loadCorsImage } from '../lib/covers.js';
 
-const MAX_BOOKS = 36;
+const MAX_BOOKS = 30;
+
+/**
+ * The ring shows at most MAX_BOOKS: the user's own books first (newest first),
+ * then the starting collection taken one section at a time, so every shelf is represented.
+ */
+function pickForRing(list) {
+  const own = list.filter((b) => b.addedAt).sort((a, b) => b.addedAt - a.addedAt);
+  const rest = list.filter((b) => !b.addedAt);
+  const bySection = new Map();
+  rest.forEach((b) => { if (!bySection.has(b.sectionId)) bySection.set(b.sectionId, []); bySection.get(b.sectionId).push(b); });
+  const queues = [...bySection.values()];
+  const mixed = [];
+  for (let i = 0; queues.some((q) => q.length); i = (i + 1) % queues.length) {
+    const q = queues[i];
+    if (q.length) mixed.push(q.shift());
+  }
+  return [...own, ...mixed].slice(0, MAX_BOOKS);
+}
 
 export class Bookcase {
   constructor(canvas, { onOpen, reduce = false } = {}) {
@@ -91,7 +109,7 @@ export class Bookcase {
 
   /** Rebuilds the ring from the collection. New books drop in; known ones stay put. */
   setBooks(list) {
-    const books = [...list].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, MAX_BOOKS);
+    const books = pickForRing(list);
     const ids = new Set(books.map((b) => b.id));
     // Remove books no longer present.
     for (const m of [...this.meshes]) {
@@ -147,8 +165,8 @@ export class Bookcase {
     const ready = document.fonts ? Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]) : Promise.resolve();
     await ready;
     if (!this.byId.has(u.id) || this.byId.get(u.id) !== m) return;
-    const sw = Math.max(48, Math.round((512 * u.Tk) / u.H));
-    const spine = new THREE.CanvasTexture(drawSpine(b, sw));
+    const sw = Math.max(96, Math.round((1024 * u.Tk) / u.H));
+    const spine = new THREE.CanvasTexture(drawSpine(b, sw, 1024));
     this.applyTex(m, u.spineMat, spine);
     let coverSource = null;
     if (b.cover) coverSource = await loadCorsImage(b.cover);
