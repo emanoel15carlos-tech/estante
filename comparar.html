@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Comparar APIs — Estante</title>
+  <meta name="theme-color" content="#15110D">
+</head>
+<body>
+  <header class="top wrap">
+    <a class="brand serif" href="./">Estante</a>
+    <a class="btn" href="./">Voltar para a estante</a>
+  </header>
+
+  <main class="cmp wrap">
+    <div class="cmp-intro">
+      <h1 class="serif">Google Books ou Open Library?</h1>
+      <p class="lede">Liste os livros que você realmente tem, um por linha, e veja qual API encontra mais, com capa e sinopse. Use “Título — Autor” para resultados mais precisos.</p>
+    </div>
+
+    <form class="cmp-form" id="batch-form">
+      <label for="titles" class="field-label">Livros para testar</label>
+      <textarea id="titles" rows="9" placeholder="Torto Arado — Itamar Vieira Junior&#10;Capitães da Areia — Jorge Amado&#10;A Hora da Estrela — Clarice Lispector&#10;9788535914849"></textarea>
+      <div class="cmp-actions">
+        <button type="submit" class="btn btn-solid" id="run">Comparar</button>
+        <button type="button" class="btn" id="from-shelf">Usar os livros da minha estante</button>
+        <label class="check"><input type="checkbox" id="deep" checked> Conferir sinopse e capa de verdade (mais lento)</label>
+      </div>
+      <p class="status" id="cmp-status" aria-live="polite"></p>
+    </form>
+
+    <section class="score" id="score" hidden aria-label="Placar"></section>
+
+    <div class="table-box" id="table-box" hidden>
+      <table class="cmp-table">
+        <caption class="sr">Resultado por livro</caption>
+        <thead>
+          <tr>
+            <th scope="col" rowspan="2">Livro pesquisado</th>
+            <th scope="colgroup" colspan="4">Google Books</th>
+            <th scope="colgroup" colspan="4">Open Library</th>
+          </tr>
+          <tr>
+            <th scope="col">Achou</th><th scope="col">Capa</th><th scope="col">Sinopse</th><th scope="col">Português</th>
+            <th scope="col">Achou</th><th scope="col">Capa</th><th scope="col">Sinopse</th><th scope="col">Português</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <p class="small cmp-note">“Achou” considera o primeiro resultado com título parecido. “Português” indica uma edição ou tradução em português entre os resultados. A Open Library limita as consultas a cerca de uma por segundo, por isso o teste dela é mais lento.</p>
+  </main>
+
+  <script type="module" src="/src/compare.js"></script>
+</body>
+</html>

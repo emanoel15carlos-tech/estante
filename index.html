@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estante — sua biblioteca</title>
+  <meta name="description" content="Uma biblioteca pessoal animada: guarde, encontre e lembre o que você lê.">
+  <meta name="theme-color" content="#15110D">
+</head>
+<body>
+  <header class="top wrap">
+    <a class="brand serif" href="./">Estante</a>
+    <div class="top-actions">
+      <div class="search-box">
+        <label for="busca" class="sr">Buscar na estante por título ou autor</label>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+        <input id="busca" type="search" placeholder="Buscar na estante" autocomplete="off">
+      </div>
+      <button type="button" class="btn btn-solid" id="open-add">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8"/></svg>
+        Adicionar livro
+      </button>
+    </div>
+  </header>
+
+  <section class="intro wrap">
+    <h1 class="serif">Cada livro <span>no seu lugar.</span></h1>
+    <p class="lede" id="lede"></p>
+  </section>
+
+  <div class="stage3d">
+    <canvas id="bookcase" aria-label="Estante giratória em 3D com os livros da coleção. Os mesmos livros estão nas prateleiras abaixo." role="img"></canvas>
+    <p class="hint">Arraste para girar a estante. Clique num livro para tirá-lo da prateleira.</p>
+  </div>
+
+  <nav class="tabs wrap" id="tabs" aria-label="Seções"></nav>
+
+  <main class="shelves wrap" id="shelves"></main>
+
+  <footer class="foot wrap">
+    <span>Dados de livros: Google Books, Open Library e BrasilAPI.</span>
+    <span class="foot-links">
+      <a href="./comparar.html">Comparar as APIs</a>
+      <button type="button" class="link-btn" id="reset">Restaurar acervo inicial</button>
+    </span>
+  </footer>
+
+  <!-- Book view -->
+  <div class="overlay" id="book-view" hidden>
+    <button type="button" class="scrim" data-close aria-label="Fechar" tabindex="-1"></button>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="bv-title">
+      <div class="card-bg"></div>
+      <button type="button" class="icon-btn card-close" data-close aria-label="Fechar">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <div class="stage">
+        <div class="anchor">
+          <div class="book3d" id="book3d"></div>
+        </div>
+      </div>
+      <div class="info" id="bv-info"></div>
+    </div>
+  </div>
+
+  <!-- Add book drawer -->
+  <div class="drawer-wrap" id="drawer" hidden>
+    <button type="button" class="scrim" data-close-drawer aria-label="Fechar" tabindex="-1"></button>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="add-title">
+      <div class="drawer-head">
+        <h2 id="add-title" class="serif">Adicionar livro</h2>
+        <button type="button" class="icon-btn" data-close-drawer aria-label="Fechar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+      </div>
+      <div class="seg" role="tablist" aria-label="Como adicionar">
+        <button type="button" role="tab" class="seg-btn is-on" aria-selected="true" data-mode="search">Buscar</button>
+        <button type="button" role="tab" class="seg-btn" aria-selected="false" data-mode="manual">Cadastrar à mão</button>
+      </div>
+
+      <div class="mode" data-panel="search">
+        <form class="search-form" id="api-form">
+          <label for="api-q" class="field-label">Título, autor ou ISBN</label>
+          <div class="search-row">
+            <input id="api-q" type="search" autocomplete="off" placeholder="Ex.: Torto Arado, ou 9788554510026" required>
+            <button type="submit" class="btn btn-solid">Buscar</button>
+          </div>
+        </form>
+        <p class="status" id="api-status" aria-live="polite"></p>
+        <ol class="results" id="api-results"></ol>
+      </div>
+
+      <div class="mode" data-panel="manual" hidden>
+        <form class="manual" id="manual-form" novalidate>
+          <div class="cover-pick">
+            <div class="cover-preview" id="m-preview" aria-hidden="true"><span>Sem capa</span></div>
+            <div class="cover-pick-actions">
+              <label class="btn btn-ghost file-btn">
+                Enviar foto da capa
+                <input type="file" id="m-cover" accept="image/*">
+              </label>
+              <button type="button" class="link-btn" id="m-cover-clear" hidden>Remover capa</button>
+              <p class="small">Sem foto, a estante desenha uma capa com o título.</p>
+            </div>
+          </div>
+          <label class="field"><span class="field-label">Título</span><input name="title" required></label>
+          <label class="field"><span class="field-label">Autor</span><input name="author" required placeholder="Separe vários autores com vírgula"></label>
+          <div class="field-row">
+            <label class="field"><span class="field-label">Ano</span><input name="year" inputmode="numeric" maxlength="20"></label>
+            <label class="field"><span class="field-label">ISBN</span><input name="isbn" inputmode="numeric"></label>
+          </div>
+          <label class="field"><span class="field-label">Sinopse</span><textarea name="synopsis" rows="4"></textarea></label>
+          <div class="field-row">
+            <label class="field"><span class="field-label">Seção</span><select name="section" class="section-select"></select></label>
+            <label class="field"><span class="field-label">Status</span>
+              <select name="status">
+                <option value="">Na estante</option>
+                <option value="quero">Quero ler</option>
+                <option value="lendo">Lendo</option>
+                <option value="lido">Lido</option>
+              </select>
+            </label>
+          </div>
+          <label class="field new-section" hidden><span class="field-label">Nome da nova seção</span><input name="newSection"></label>
+          <p class="form-error" id="m-error" role="alert"></p>
+          <button type="submit" class="btn btn-solid btn-wide">Colocar na estante</button>
+        </form>
+      </div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
