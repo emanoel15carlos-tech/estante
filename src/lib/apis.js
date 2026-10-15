@@ -356,11 +356,13 @@ export async function bookInsights(book, { signal } = {}) {
   const q = book.isbn ? 'isbn:' + cleanIsbn(book.isbn) : `${searchTitle} ${author}`.trim();
   return cached('ins:' + q, async () => {
     await olThrottle();
-    const params = new URLSearchParams({ q, limit: '5', fields: INSIGHT_FIELDS });
+    const params = new URLSearchParams({ q, limit: '8', fields: INSIGHT_FIELDS });
     const data = await getJson(OL + '/search.json?' + params, { signal, timeout: 15000 });
     const docs = (data && data.docs) || [];
     const want = titleKey(searchTitle);
-    const doc = docs.find((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); }) || docs[0];
+    // Among the works whose title matches, take the one with the most editions (the canonical work).
+    const matches = docs.filter((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); });
+    const doc = (matches.length ? matches : docs).slice().sort((a, b) => (b.edition_count || 0) - (a.edition_count || 0))[0];
     if (!doc) return null;
 
     const subjects = doc.subject || [];
@@ -446,8 +448,11 @@ export async function portugueseEditions(book, { signal } = {}) {
   if (!title) return [];
   const surnames = [...new Set([(book.authors || [])[0], book.searchAuthor]
     .filter(Boolean).map((a) => iaTerm(String(a).split(' ').pop())).filter((x) => x.length > 2))];
+  // Only items that are out of copyright: old printings, Project Gutenberg mirrors,
+  // or items the Archive marks as not in copyright. User uploads of modern editions are left out.
   const base = [`title:(${title})`, 'language:(por OR portuguese OR pt OR "Português")', 'mediatype:texts',
-    'NOT collection:(inlibrary OR printdisabled OR lendinglibrary OR internetarchivebooks)'];
+    'NOT collection:(inlibrary OR printdisabled OR lendinglibrary OR internetarchivebooks)',
+    '(year:[0 TO 1929] OR collection:(gutenberg) OR possible-copyright-status:("NOT_IN_COPYRIGHT"))'];
   const withAuthor = surnames.length ? [...base, `creator:(${surnames.join(' OR ')})`] : base;
   const run = (parts) => {
     const q = parts.join(' AND ');
@@ -462,8 +467,10 @@ export async function portugueseEditions(book, { signal } = {}) {
   return first.length || withAuthor === base ? first : run(base);
 }
 
+const PIRATE = /z.?lib|libgen|library genesis|anna.?s archive|pirat/i;
+
 function mapIa(docs) {
-  return docs.slice(0, 4).map((d) => ({
+  return docs.filter((d) => !PIRATE.test(`${d.identifier} ${d.title}`)).slice(0, 4).map((d) => ({
     id: d.identifier,
     title: Array.isArray(d.title) ? d.title[0] : d.title,
     year: d.year || (d.date ? String(d.date).slice(0, 4) : ''),
