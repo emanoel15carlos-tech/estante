@@ -10,6 +10,7 @@ const STATUS = [
   ['lendo', 'Lendo'],
   ['lido', 'Lido'],
 ];
+const STAMP = { quero: 'Quero ler', lendo: 'Lendo', lido: 'Lido' };
 const STATUS_TEXT = { quero: 'Na fila de leitura', lendo: 'Leitura em andamento', lido: 'Lido' };
 
 const TABS = [
@@ -102,8 +103,11 @@ export class BookView {
       prov = `Capa: ${esc(SOURCE_LABEL[b.coverSource])}`;
     }
     const tab = this.tab || 'sobre';
+    const cn = store.callNumber(b, section);
     this.info.innerHTML = `
+      <span class="stamp${b.status ? ' is-' + b.status : ''}" data-stamp aria-hidden="true">${b.status ? STAMP[b.status] : ''}</span>
       <div>
+        <p class="card-callno"><span>${esc([cn.code, cn.cutter].filter(Boolean).join(' '))}</span><span>Ficha catalográfica</span></p>
         <h2 id="bv-title">${esc(b.title)}</h2>
         <p class="byline">${esc((b.authors || []).join(', '))} <span>${b.year ? '· ' + esc(b.year) + ' ' : ''}· ${esc(section ? section.name : 'Sem seção')}</span></p>
       </div>
@@ -349,6 +353,12 @@ export class BookView {
         p.classList.toggle('is-on', on);
         p.setAttribute('aria-pressed', String(on));
       });
+      const stamp = this.info.querySelector('[data-stamp]');
+      if (stamp) {
+        stamp.className = 'stamp' + (next ? ' is-' + next : '');
+        stamp.textContent = next ? STAMP[next] : '';
+        if (next && !this.reduce) gsap.fromTo(stamp, { scale: 1.6, opacity: 0, rotation: -18 }, { scale: 1, opacity: 1, rotation: -9, duration: 0.35, ease: 'back.out(2.2)' });
+      }
       const st = this.book3d.querySelector('[data-status-text]');
       if (st) st.textContent = next ? STATUS_TEXT[next] : 'Na estante';
       return;

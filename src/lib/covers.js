@@ -1,7 +1,7 @@
 // Cover images: loading real covers (with CORS when possible), drawing a
 // typographic cover when there is none, and shrinking uploaded photos.
 
-const FRAUNCES = '"Fraunces Variable", "Fraunces", Georgia, serif';
+const FRAUNCES = '"IM Fell English", Georgia, serif';
 const FIGTREE = '"Figtree Variable", "Figtree", system-ui, sans-serif';
 
 /**
@@ -68,9 +68,9 @@ export function drawCover(book, w = 512, h = 768) {
   x.font = `500 22px ${FIGTREE}`;
   x.fillText(String((book.authors || [])[0] || '').toUpperCase().slice(0, 34), 62, 52);
   let size = 58;
-  x.font = `600 ${size}px ${FRAUNCES}`;
+  x.font = `400 ${size}px ${FRAUNCES}`;
   let lines = wrap(x, book.title, w - 120);
-  while (lines.length > 4 && size > 30) { size -= 4; x.font = `600 ${size}px ${FRAUNCES}`; lines = wrap(x, book.title, w - 120); }
+  while (lines.length > 4 && size > 30) { size -= 4; x.font = `400 ${size}px ${FRAUNCES}`; lines = wrap(x, book.title, w - 120); }
   const lh = size * 1.04;
   const y0 = h - 70 - lines.length * lh;
   lines.forEach((l, k) => x.fillText(l, 62, y0 + k * lh));
@@ -119,17 +119,17 @@ export function drawSpine(book, w, h = 1024) {
   const centre = h * 0.07; // title sits a little above the middle; author goes below
   let size = Math.round(w * 0.42);
   const min = Math.round(w * 0.24);
-  x.font = `600 ${size}px ${FRAUNCES}`;
-  while (x.measureText(book.title).width > room && size > min) { size -= 1; x.font = `600 ${size}px ${FRAUNCES}`; }
+  x.font = `400 ${size}px ${FRAUNCES}`;
+  while (x.measureText(book.title).width > room && size > min) { size -= 1; x.font = `400 ${size}px ${FRAUNCES}`; }
   if (x.measureText(book.title).width <= room) {
     x.fillText(book.title, centre, 0);
   } else {
     // Two lines across the spine's width.
     size = Math.round(w * 0.27);
-    x.font = `600 ${size}px ${FRAUNCES}`;
+    x.font = `400 ${size}px ${FRAUNCES}`;
     let lines = splitTwo(x, book.title);
     while (Math.max(...lines.map((l) => x.measureText(l).width)) > room && size > 10) {
-      size -= 1; x.font = `600 ${size}px ${FRAUNCES}`; lines = splitTwo(x, book.title);
+      size -= 1; x.font = `400 ${size}px ${FRAUNCES}`; lines = splitTwo(x, book.title);
     }
     const gap = size * 0.58;
     x.fillText(lines[0], centre, -gap);

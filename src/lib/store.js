@@ -12,17 +12,20 @@ export const PALETTE = [
   ['#242120', '#E3D6BD'], ['#6E7647', '#F2EBD9'],
 ];
 
+// `code` is the shelf mark printed on the brass plate and on each spine label:
+// a Dewey class for subjects, a genre letter code for fiction, as public libraries do.
 const DEFAULT_SECTIONS = [
-  { id: 'br', name: 'Literatura brasileira' },
-  { id: 'cl', name: 'Clássicos do mundo' },
-  { id: 'fa', name: 'Fantástico & horror' },
-  { id: 'fi', name: 'Filosofia & ideias' },
-  { id: 'po', name: 'Poesia & teatro' },
-  { id: 'av', name: 'Aventura & mistério' },
-  { id: 'fn', name: 'Fantasia' },
-  { id: 'in', name: 'Infantil & juvenil' },
-  { id: 'sf', name: 'Ficção científica' },
+  { id: 'br', name: 'Literatura brasileira', code: 'B869' },
+  { id: 'cl', name: 'Clássicos do mundo', code: '800' },
+  { id: 'fa', name: 'Fantástico & horror', code: 'TER' },
+  { id: 'fi', name: 'Filosofia & ideias', code: '100' },
+  { id: 'po', name: 'Poesia & teatro', code: '808.1' },
+  { id: 'av', name: 'Aventura & mistério', code: 'MIS' },
+  { id: 'fn', name: 'Fantasia', code: 'FAN' },
+  { id: 'in', name: 'Infantil & juvenil', code: 'INF' },
+  { id: 'sf', name: 'Ficção científica', code: 'FC' },
 ];
+const DEFAULT_CODE = Object.fromEntries(DEFAULT_SECTIONS.map((s) => [s.id, s.code]));
 
 // Bump when the starting collection grows: older saved collections receive the new books.
 const SEED_VERSION = 3;
@@ -236,6 +239,7 @@ function seed() {
   return {
     version: 1,
     seedVersion: SEED_VERSION,
+    removedSections: [],
     sections: DEFAULT_SECTIONS.map((s) => ({ ...s })),
     books: SEED.map((_, i) => seedBook(i)),
   };
@@ -243,6 +247,8 @@ function seed() {
 
 /** Brings a collection saved by an older version up to date. */
 function migrate(data) {
+  data.removedSections = data.removedSections || [];
+  data.sections = data.sections.map((s) => (s.code === undefined ? { ...s, code: DEFAULT_CODE[s.id] || '' } : s));
   // Starting books saved before the covers were bundled get their covers.
   data.books = data.books.map((b) => {
     const m = /^seed-(\d+)$/.exec(b.id);
@@ -257,10 +263,10 @@ function migrate(data) {
   if ((data.seedVersion || 1) < SEED_VERSION) {
     const ids = new Set(data.books.map((b) => b.id));
     for (const s of DEFAULT_SECTIONS) {
-      if (!data.sections.some((x) => x.id === s.id)) data.sections.push({ ...s });
+      if (!data.sections.some((x) => x.id === s.id) && !data.removedSections.includes(s.id)) data.sections.push({ ...s });
     }
     for (let i = SEED_COUNTS[data.seedVersion || 1] || 20; i < SEED.length; i++) {
-      if (!ids.has('seed-' + i)) data.books.push(seedBook(i));
+      if (!ids.has('seed-' + i) && data.sections.some((x) => x.id === SEED[i][3])) data.books.push(seedBook(i));
     }
     data.seedVersion = SEED_VERSION;
     try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* quota or blocked */ }
@@ -347,13 +353,49 @@ export function removeBook(id) {
   commit({ ...state, books: state.books.filter((b) => b.id !== id) }, { removed: id });
 }
 
-export function addSection(name) {
+export function addSection(name, code = '') {
   const clean = name.trim();
   const existing = state.sections.find((s) => norm(s.name) === norm(clean));
   if (existing) return existing;
-  const section = { id: 's-' + uid(), name: clean };
+  const section = { id: 's-' + uid(), name: clean, code: code.trim().toUpperCase().slice(0, 8) };
   commit({ ...state, sections: [...state.sections, section] }, { section: section.id });
   return section;
+}
+
+export function updateSection(id, patch) {
+  const clean = { ...patch };
+  if (clean.name !== undefined) clean.name = clean.name.trim();
+  if (clean.code !== undefined) clean.code = clean.code.trim().toUpperCase().slice(0, 8);
+  commit({ ...state, sections: state.sections.map((s) => (s.id === id ? { ...s, ...clean } : s)) }, { section: id });
+}
+
+export function moveSection(id, dir) {
+  const list = [...state.sections];
+  const i = list.findIndex((s) => s.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  commit({ ...state, sections: list }, { section: id, reordered: true });
+}
+
+/** Removes a section; its books move to `targetId` (required when it has books). */
+export function removeSection(id, targetId) {
+  const hasBooks = state.books.some((b) => b.sectionId === id);
+  if (hasBooks && !state.sections.some((s) => s.id === targetId && s.id !== id)) return false;
+  commit({
+    ...state,
+    removedSections: [...new Set([...(state.removedSections || []), id])],
+    sections: state.sections.filter((s) => s.id !== id),
+    books: state.books.map((b) => (b.sectionId === id ? { ...b, sectionId: targetId } : b)),
+  }, { section: id, removedSection: true });
+  return true;
+}
+
+/** Shelf mark for a book: the section code plus the first letters of the author's surname. */
+export function callNumber(book, section) {
+  const surname = String((book.authors || [])[0] || '').split(' ').filter(Boolean).pop() || book.title || '';
+  const cutter = surname.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+  return { code: (section && section.code) || '', cutter };
 }
 
 export function resetCollection() {

@@ -9,16 +9,19 @@
 </head>
 <body>
   <header class="top wrap">
-    <a class="brand serif" href="./">Estante</a>
+    <a class="plaque" href="./" aria-label="Estante, início">
+      <span class="plaque-name">Estante</span>
+      <span class="plaque-sub">biblioteca particular</span>
+    </a>
     <div class="top-actions">
       <div class="search-box">
-        <label for="busca" class="sr">Buscar na estante por título ou autor</label>
+        <label for="busca" class="sr">Consultar o acervo por título, autor ou ISBN</label>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-        <input id="busca" type="search" placeholder="Buscar na estante" autocomplete="off">
+        <input id="busca" type="search" placeholder="Consultar o acervo" autocomplete="off">
       </div>
-      <button type="button" class="btn btn-solid" id="open-add">
+      <button type="button" class="btn btn-brass" id="open-add">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8"/></svg>
-        Adicionar livro
+        Catalogar livro
       </button>
     </div>
   </header>
@@ -33,12 +36,27 @@
     <p class="hint">Arraste para girar a estante. Clique num livro para tirá-lo da prateleira.</p>
   </div>
 
-  <nav class="tabs wrap" id="tabs" aria-label="Seções"></nav>
+  <section class="catalog wrap" aria-labelledby="catalog-h">
+    <div class="catalog-head">
+      <h2 id="catalog-h" class="serif">Fichário</h2>
+      <button type="button" class="btn btn-quiet" id="open-sections">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5"/><circle cx="5" cy="4" r="1.6" fill="currentColor"/><circle cx="11" cy="8" r="1.6" fill="currentColor"/><circle cx="7" cy="12" r="1.6" fill="currentColor"/></svg>
+        Organizar seções
+      </button>
+    </div>
+    <nav class="drawers" id="tabs" aria-label="Seções do acervo"></nav>
+  </section>
 
-  <main class="shelves wrap" id="shelves"></main>
+  <main class="bookcase wrap">
+    <div class="case">
+      <div class="cornice" aria-hidden="true"></div>
+      <div class="shelves" id="shelves"></div>
+      <div class="plinth" aria-hidden="true"></div>
+    </div>
+  </main>
 
   <footer class="foot wrap">
-    <span>Dados de livros: Google Books, Open Library e BrasilAPI.</span>
+    <span>Dados de livros: Google Books, Open Library, BrasilAPI e Internet Archive.</span>
     <span class="foot-links">
       <a href="./comparar.html">Comparar as APIs</a>
       <button type="button" class="link-btn" id="reset">Restaurar acervo inicial</button>
@@ -58,16 +76,16 @@
           <div class="book3d" id="book3d"></div>
         </div>
       </div>
-      <div class="info" id="bv-info"></div>
+      <div class="info paper" id="bv-info"></div>
     </div>
   </div>
 
   <!-- Add book drawer -->
   <div class="drawer-wrap" id="drawer" hidden>
     <button type="button" class="scrim" data-close-drawer aria-label="Fechar" tabindex="-1"></button>
-    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="add-title">
+    <aside class="drawer paper" role="dialog" aria-modal="true" aria-labelledby="add-title">
       <div class="drawer-head">
-        <h2 id="add-title" class="serif">Adicionar livro</h2>
+        <h2 id="add-title" class="serif">Catalogar livro</h2>
         <button type="button" class="icon-btn" data-close-drawer aria-label="Fechar">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
         </button>
@@ -126,6 +144,30 @@
           <button type="submit" class="btn btn-solid btn-wide">Colocar na estante</button>
         </form>
       </div>
+    </aside>
+  </div>
+
+  <!-- Sections manager -->
+  <div class="drawer-wrap" id="sections-panel" hidden>
+    <button type="button" class="scrim" data-close-sections aria-label="Fechar" tabindex="-1"></button>
+    <aside class="drawer paper" role="dialog" aria-modal="true" aria-labelledby="sec-title">
+      <div class="drawer-head">
+        <h2 id="sec-title" class="serif">Organizar seções</h2>
+        <button type="button" class="icon-btn" data-close-sections aria-label="Fechar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+      </div>
+      <p class="small">O código aparece na plaqueta da prateleira e na etiqueta de cada livro, como nas bibliotecas: uma classe (100, 800) ou uma sigla de gênero (FAN, INF).</p>
+      <ol class="sec-list" id="sec-list"></ol>
+      <form class="sec-new" id="sec-new" novalidate>
+        <h3 class="bv-h">Nova seção</h3>
+        <div class="sec-new-fields">
+          <label class="field"><span class="field-label">Nome</span><input name="name" maxlength="40" placeholder="Ex.: Romance" autocomplete="off" required></label>
+          <label class="field"><span class="field-label">Código</span><input name="code" maxlength="8" placeholder="Ex.: ROM" autocomplete="off"></label>
+        </div>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn btn-solid">Criar seção</button>
+      </form>
     </aside>
   </div>
 

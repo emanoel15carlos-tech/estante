@@ -9,6 +9,7 @@ import { debounce, esc, norm, sleep } from './lib/util.js';
 import { Bookcase } from './scene/bookcase.js';
 import { BookView } from './ui/bookView.js';
 import { AddBook } from './ui/addBook.js';
+import { SectionsPanel } from './ui/sections.js';
 
 gsap.registerPlugin(ScrollTrigger, Flip);
 
@@ -51,24 +52,32 @@ function renderLede() {
   const read = books.filter((b) => b.status === 'lido').length;
   const n = books.length;
   $lede.textContent = n
-    ? `Uma biblioteca para guardar, encontrar e lembrar o que você lê. Hoje são ${n} ${n === 1 ? 'livro' : 'livros'} em ${sections.length} ${sections.length === 1 ? 'seção' : 'seções'}, e ${read} ${read === 1 ? 'já foi lido' : 'já foram lidos'}.`
-    : 'Sua estante está vazia. Adicione o primeiro livro pela busca ou à mão.';
+    ? `Uma biblioteca para guardar, encontrar e lembrar o que você lê. O acervo tem ${n} ${n === 1 ? 'volume' : 'volumes'} em ${sections.length} ${sections.length === 1 ? 'seção' : 'seções'}, e ${read} ${read === 1 ? 'já foi lido' : 'já foram lidos'}.`
+    : 'O acervo está vazio. Catalogue o primeiro livro pela busca ou à mão.';
 }
+
+const volumes = (n) => `${n} ${n === 1 ? 'volume' : 'volumes'}`;
 
 function renderTabs() {
   const { sections, books } = store.getState();
   if (ui.cat !== 'todas' && !sections.some((s) => s.id === ui.cat)) ui.cat = 'todas';
   const count = (id) => books.filter((b) => b.sectionId === id).length;
-  const tabs = [{ id: 'todas', name: 'Todas as seções', n: books.length }, ...sections.map((s) => ({ ...s, n: count(s.id) }))];
-  $tabs.innerHTML = tabs
-    .map((t) => `<button type="button" class="tab${t.id === ui.cat ? ' is-on' : ''}" data-cat="${esc(t.id)}" aria-pressed="${t.id === ui.cat}">${esc(t.name)}<span class="n">${t.n}</span></button>`)
+  const drawers = [{ id: 'todas', name: 'Todo o acervo', code: 'A–Z', n: books.length }, ...sections.map((s) => ({ ...s, n: count(s.id) }))];
+  $tabs.innerHTML = drawers
+    .map((d) => `<button type="button" class="cab-drawer${d.id === ui.cat ? ' is-on' : ''}" data-cat="${esc(d.id)}" aria-pressed="${d.id === ui.cat}">
+        <span class="label-holder"><span class="label-code">${esc(d.code || '—')}</span><span class="label-name">${esc(d.name)}</span></span>
+        <span class="pull" aria-hidden="true"></span>
+        <span class="drawer-count">${volumes(d.n)}</span>
+      </button>`)
     .join('');
 }
 
-function spineHtml(b) {
+function spineHtml(b, section) {
+  const cn = store.callNumber(b, section);
   return `<span class="slot${b.id === ui.openId ? ' is-out' : ''}" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
     <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
       <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>
+      <span class="callno" aria-hidden="true">${cn.code ? `<span>${esc(cn.code)}</span>` : ''}<span>${esc(cn.cutter)}</span></span>
     </button>
   </span>`;
 }
@@ -86,18 +95,19 @@ function renderShelves({ flip = true } = {}) {
   const html = shown.map((s) => {
     const bs = books.filter((b) => b.sectionId === s.id);
     if (!bs.length && ui.q) return '';
-    return `<section class="shelf" data-section="${esc(s.id)}">
-      <div class="shelf-head"><h2>${esc(s.name)}</h2><span>${bs.length} ${bs.length === 1 ? 'livro' : 'livros'}</span></div>
+    return `<section class="shelf" data-section="${esc(s.id)}" aria-labelledby="sh-${esc(s.id)}">
       <div class="shelf-back"><div class="shelf-row">
-        ${bs.length ? bs.map(spineHtml).join('') : '<p class="shelf-empty">Nenhum livro nesta seção ainda.</p>'}
+        ${bs.length ? bs.map((b) => spineHtml(b, s)).join('') : '<p class="shelf-empty">Prateleira vazia. Catalogue um livro nesta seção ou mova um para cá.</p>'}
       </div></div>
-      <div class="plank"></div>
+      <div class="plank">
+        <h2 class="plate" id="sh-${esc(s.id)}">${s.code ? `<span class="plate-code">${esc(s.code)}</span>` : ''}<span class="plate-name">${esc(s.name)}</span><span class="plate-n">${volumes(bs.length)}</span></h2>
+      </div>
     </section>`;
   }).join('');
   $shelves.innerHTML = html || `<div class="empty">
-      <p class="serif">Nenhum livro com esse nome por aqui.</p>
-      <p class="small">Confira a grafia, ou adicione o livro pela busca nas APIs.</p>
-      <button type="button" class="btn btn-solid" data-add-from-empty>Adicionar livro</button>
+      <p class="serif">Nada no acervo com esse nome.</p>
+      <p class="small">Confira a grafia, ou catalogue o livro pela busca nas APIs.</p>
+      <button type="button" class="btn btn-brass" data-add-from-empty>Catalogar livro</button>
     </div>`;
   if (state) {
     Flip.from(state, {
@@ -186,9 +196,12 @@ const add = new AddBook({
   },
 });
 
+const sectionsPanel = new SectionsPanel({ reduce, onChanged: (msg) => { if (msg) toast(msg); } });
+document.getElementById('open-sections').addEventListener('click', () => sectionsPanel.open());
+
 store.subscribe((state, meta) => {
   renderLede();
-  if (meta.updated && !meta.moved) {
+  if (meta.updated && !meta.moved && !meta.section) {
     patchSpine(meta.updated);
     renderTabs();
   } else {
