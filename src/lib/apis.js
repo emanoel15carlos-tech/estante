@@ -351,14 +351,15 @@ const NOTABLE_LIST = /(1001|must.?read|best|great|classic|cl[aá]ssic|essential|
 const titleKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
 
 export async function bookInsights(book, { signal } = {}) {
-  const author = (book.authors || [])[0] || '';
-  const q = book.isbn ? 'isbn:' + cleanIsbn(book.isbn) : `${book.title} ${author}`.trim();
+  const author = book.searchAuthor || (book.authors || [])[0] || '';
+  const searchTitle = book.searchTitle || book.title;
+  const q = book.isbn ? 'isbn:' + cleanIsbn(book.isbn) : `${searchTitle} ${author}`.trim();
   return cached('ins:' + q, async () => {
     await olThrottle();
     const params = new URLSearchParams({ q, limit: '5', fields: INSIGHT_FIELDS });
     const data = await getJson(OL + '/search.json?' + params, { signal, timeout: 15000 });
     const docs = (data && data.docs) || [];
-    const want = titleKey(book.title);
+    const want = titleKey(searchTitle);
     const doc = docs.find((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); }) || docs[0];
     if (!doc) return null;
 
@@ -442,25 +443,31 @@ const iaTerm = (s) => String(s || '').replace(/[()"':\\[\]{}^~*?!+&|/-]/g, ' ').
  */
 export async function portugueseEditions(book, { signal } = {}) {
   const title = iaTerm(book.title);
-  const surname = iaTerm(String((book.authors || [])[0] || '').split(' ').pop());
   if (!title) return [];
-  const q = [
-    `title:(${title})`,
-    surname ? `creator:(${surname})` : '',
-    'language:(por OR portuguese OR pt OR "Português")',
-    'mediatype:texts',
-    'NOT collection:(inlibrary OR printdisabled OR lendinglibrary OR internetarchivebooks)',
-  ].filter(Boolean).join(' AND ');
-  const url = `${IA_SEARCH}?q=${encodeURIComponent(q)}&fl[]=identifier&fl[]=title&fl[]=year&fl[]=date&fl[]=creator&fl[]=downloads&sort[]=downloads+desc&rows=6&output=json`;
-  return cached('iapt:' + q, async () => {
-    const data = await getJson(url, { signal, timeout: 20000 });
-    const docs = (data && data.response && data.response.docs) || [];
-    return docs.slice(0, 4).map((d) => ({
-      id: d.identifier,
-      title: Array.isArray(d.title) ? d.title[0] : d.title,
-      year: d.year || (d.date ? String(d.date).slice(0, 4) : ''),
-      downloads: d.downloads || 0,
-      url: `https://archive.org/details/${d.identifier}`,
-    }));
-  });
+  const surnames = [...new Set([(book.authors || [])[0], book.searchAuthor]
+    .filter(Boolean).map((a) => iaTerm(String(a).split(' ').pop())).filter((x) => x.length > 2))];
+  const base = [`title:(${title})`, 'language:(por OR portuguese OR pt OR "Português")', 'mediatype:texts',
+    'NOT collection:(inlibrary OR printdisabled OR lendinglibrary OR internetarchivebooks)'];
+  const withAuthor = surnames.length ? [...base, `creator:(${surnames.join(' OR ')})`] : base;
+  const run = (parts) => {
+    const q = parts.join(' AND ');
+    const url = `${IA_SEARCH}?q=${encodeURIComponent(q)}&fl[]=identifier&fl[]=title&fl[]=year&fl[]=date&fl[]=creator&fl[]=downloads&sort[]=downloads+desc&rows=6&output=json`;
+    return cached('iapt:' + q, async () => {
+      const data = await getJson(url, { signal, timeout: 20000 });
+      return mapIa((data && data.response && data.response.docs) || []);
+    });
+  };
+  // Author names are spelled many ways (Dostoiévski, Dostoyevsky…): fall back to the title alone.
+  const first = await run(withAuthor);
+  return first.length || withAuthor === base ? first : run(base);
+}
+
+function mapIa(docs) {
+  return docs.slice(0, 4).map((d) => ({
+    id: d.identifier,
+    title: Array.isArray(d.title) ? d.title[0] : d.title,
+    year: d.year || (d.date ? String(d.date).slice(0, 4) : ''),
+    downloads: d.downloads || 0,
+    url: `https://archive.org/details/${d.identifier}`,
+  }));
 }

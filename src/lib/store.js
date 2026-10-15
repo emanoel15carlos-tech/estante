@@ -87,6 +87,50 @@ const SEED = [
 ];
 const SEED_V1_COUNT = 20;
 
+// Original titles of translated works, used to find them in the catalogues.
+const ORIGINAL = {
+  6: ["Don Quixote", "Cervantes"],
+  7: ["Pride and Prejudice", "Jane Austen"],
+  9: ["Crime and Punishment", "Dostoyevsky"],
+  10: ["Odyssey", "Homer"],
+  12: ["Dracula", "Bram Stoker"],
+  13: ["Strange Case of Dr Jekyll and Mr Hyde", "Robert Louis Stevenson"],
+  14: ["The Metamorphosis", "Franz Kafka"],
+  15: ["Alice's Adventures in Wonderland", "Lewis Carroll"],
+  16: ["The Art of War", "Sun Tzu"],
+  17: ["The Prince", "Machiavelli"],
+  18: ["Meditations", "Marcus Aurelius"],
+  19: ["On the Origin of Species", "Charles Darwin"],
+  26: ["Les Misérables", "Victor Hugo"],
+  28: ["Anna Karenina", "Tolstoy"],
+  29: ["Great Expectations", "Charles Dickens"],
+  30: ["Wuthering Heights", "Emily Brontë"],
+  32: ["The Brothers Karamazov", "Dostoyevsky"],
+  33: ["The Picture of Dorian Gray", "Oscar Wilde"],
+  34: ["The Time Machine", "H. G. Wells"],
+  35: ["Twenty Thousand Leagues Under the Sea", "Jules Verne"],
+  36: ["The Phantom of the Opera", "Gaston Leroux"],
+  37: ["The War of the Worlds", "H. G. Wells"],
+  38: ["The Republic", "Plato"],
+  39: ["Thus Spoke Zarathustra", "Nietzsche"],
+  40: ["The Social Contract", "Rousseau"],
+  42: ["Nicomachean Ethics", "Aristotle"],
+  43: ["Discourse on Method", "Descartes"],
+  44: ["Hamlet", "Shakespeare"],
+  45: ["Romeo and Juliet", "Shakespeare"],
+  47: ["Divine Comedy", "Dante Alighieri"],
+  48: ["Faust", "Goethe"],
+  49: ["Leaves of Grass", "Walt Whitman"],
+  50: ["Around the World in Eighty Days", "Jules Verne"],
+  51: ["Treasure Island", "Robert Louis Stevenson"],
+  52: ["The Three Musketeers", "Alexandre Dumas"],
+  53: ["The Count of Monte Cristo", "Alexandre Dumas"],
+  54: ["The Hound of the Baskervilles", "Arthur Conan Doyle"],
+  55: ["A Study in Scarlet", "Arthur Conan Doyle"],
+};
+
+
+
 const coverUrl = (id) => (id ? `https://covers.openlibrary.org/b/id/${id}-L.jpg` : null);
 const seedCover = (i) => coverUrl(SEED[i] && SEED[i][5]);
 
@@ -99,6 +143,7 @@ function seedBook(i) {
     year,
     sectionId: section,
     synopsis,
+    ...(ORIGINAL[i] ? { searchTitle: ORIGINAL[i][0], searchAuthor: ORIGINAL[i][1] } : {}),
     isbn: '',
     cover: seedCover(i),
     coverSource: seedCover(i) ? 'openlibrary' : null,
@@ -137,9 +182,12 @@ function migrate(data) {
   // Starting books saved before the covers were bundled get their covers.
   data.books = data.books.map((b) => {
     const m = /^seed-(\d+)$/.exec(b.id);
-    if (!m || b.cover) return b;
-    const cover = seedCover(+m[1]);
-    return cover ? { ...b, cover, coverSource: 'openlibrary', coverTried: true } : b;
+    if (!m) return b;
+    const i = +m[1];
+    let out = b;
+    if (!out.cover && seedCover(i)) out = { ...out, cover: seedCover(i), coverSource: 'openlibrary', coverTried: true };
+    if (!out.searchTitle && ORIGINAL[i]) out = { ...out, searchTitle: ORIGINAL[i][0], searchAuthor: ORIGINAL[i][1] };
+    return out;
   });
   // Collections from before the larger starting collection receive the new books and sections.
   if ((data.seedVersion || 1) < SEED_VERSION) {

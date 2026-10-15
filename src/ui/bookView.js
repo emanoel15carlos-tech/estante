@@ -181,7 +181,7 @@ export class BookView {
     if (this.id !== id) return;
     const slot = this.info.querySelector('.pt-slot');
     if (!slot) return;
-    const old = ins.firstYear ? ins.firstYear < 1955 : /(^|\D)1[0-8]\d\d|19[0-4]\d|séc|a\.C/.test(String(b.year || ''));
+    const old = /séc|a\.C/.test(String(b.year || '')) || (parseInt(b.year, 10) || ins.firstYear || 9999) < 1955;
     const wikisource = `https://pt.wikisource.org/w/index.php?search=${encodeURIComponent(b.title + ' ' + ((b.authors || [])[0] || ''))}`;
     const rows = (list || []).map((e) => `<li class="src src-download">
         <a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><strong>Baixar no Internet Archive</strong>${ICON_OUT}</a>
