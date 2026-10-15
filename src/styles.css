@@ -311,3 +311,14 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .other-langs summary { cursor: pointer; color: var(--text-2); font-size: 15px; min-height: 32px; }
 .other-langs summary:hover { color: var(--text); }
 .other-langs .sources { margin-top: 10px; }
+.my-links { display: flex; flex-direction: column; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--line-soft); }
+.src-mine { border-color: var(--line); }
+.src-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.src-row .link-btn { padding: 8px 0; min-height: 32px; }
+.link-form { display: flex; flex-direction: column; gap: 8px; }
+.link-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 10px; }
+.link-form .btn { align-self: flex-start; min-height: 42px; }
+.link-form .form-error { min-height: 0; }
+.link-form .form-error:empty { display: none; }
+.opt { color: var(--muted); font-weight: 400; }
+@media (max-width: 520px) { .link-fields { grid-template-columns: minmax(0, 1fr); } }

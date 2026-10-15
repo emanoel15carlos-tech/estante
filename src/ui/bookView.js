@@ -3,7 +3,7 @@
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
 import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
-import { esc } from '../lib/util.js';
+import { esc, hostOf, normalizeUrl, uid } from '../lib/util.js';
 
 const STATUS = [
   ['quero', 'Quero ler'],
@@ -46,6 +46,12 @@ export class BookView {
     this.closeBtn.addEventListener('click', () => this.close());
     this.info.addEventListener('click', (e) => this.onClick(e));
     this.info.addEventListener('change', (e) => this.onChange(e));
+    this.info.addEventListener('submit', (e) => {
+      const form = e.target.closest('[data-link-form]');
+      if (!form) return;
+      e.preventDefault();
+      this.onLinkSubmit(form);
+    });
     document.addEventListener('keydown', (e) => {
       if (this.id && e.key === 'Escape') { e.preventDefault(); this.close(); }
     });
@@ -117,7 +123,7 @@ export class BookView {
         </div>
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
       </div>
-      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}><p class="bv-loading">Buscando informações na Open Library…</p></div>`).join('')}
+      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
         <button type="button" class="btn btn-solid" data-act="cover">${this.coverOpen ? 'Fechar livro' : 'Abrir livro'}</button>
         <button type="button" class="btn" data-act="prev" aria-label="Livro anterior"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.6"/></svg>Anterior</button>
@@ -152,16 +158,63 @@ export class BookView {
       ? '<p class="bv-loading">Não foi possível falar com a Open Library agora. Tente de novo daqui a pouco.</p>'
       : '<p class="bv-loading">A Open Library não tem esta obra cadastrada.</p>';
     if (!ins) {
-      TABS.slice(1).forEach(([t]) => { const p = this.panel(t); if (p) p.innerHTML = msg; });
+      TABS.slice(1).forEach(([t]) => { const p = t === 'ler' ? this.info.querySelector('.ler-auto') : this.panel(t); if (p) p.innerHTML = msg; });
       return;
     }
-    this.panel('ler').innerHTML = this.readHtml(ins);
+    this.info.querySelector('.ler-auto').innerHTML = this.readHtml(ins);
     this.panel('leitores').innerHTML = this.readersHtml(ins);
     this.panel('temas').innerHTML = this.topicsHtml(ins);
     this.panel('parecidos').innerHTML = '<p class="bv-loading">Buscando livros com o mesmo tema…</p>';
     if (this.tab === 'parecidos') this.loadSimilar();
     this.loadLists(ins.key, id);
     this.loadPortuguese(b, ins, id);
+  }
+
+  myLinksHtml(b) {
+    const links = b.links || [];
+    return `<section class="my-links" aria-labelledby="ml-h">
+      <h3 class="bv-h" id="ml-h">Meus links</h3>
+      ${links.length ? `<ul class="sources">${links.map((l) => `<li class="src src-mine">
+          <a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(l.label || hostOf(l.url))}</strong>${ICON_OUT}</a>
+          <span class="src-row"><span>${esc(hostOf(l.url))}</span><button type="button" class="link-btn" data-remove-link="${esc(l.id)}" aria-label="Remover o link ${esc(l.label || hostOf(l.url))}">Remover</button></span>
+        </li>`).join('')}</ul>` : '<p class="bv-text">Guarde aqui onde você encontra este livro: uma loja, um arquivo, uma biblioteca.</p>'}
+      <form class="link-form" data-link-form novalidate>
+        <div class="link-fields">
+          <label class="field"><span class="field-label">Nome</span><input name="label" placeholder="Ex.: Minha cópia em PDF" maxlength="60" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Endereço</span><input name="url" inputmode="url" placeholder="https://…" autocomplete="off" required></label>
+        </div>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn">Adicionar link</button>
+      </form>
+    </section>`;
+  }
+
+  renderMyLinks() {
+    const b = this.book;
+    const box = this.info.querySelector('.my-links');
+    if (!b || !box) return;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = this.myLinksHtml(b);
+    box.replaceWith(tmp.firstElementChild);
+  }
+
+  onLinkSubmit(form) {
+    const err = form.querySelector('.form-error');
+    const url = normalizeUrl(form.elements.url.value);
+    if (!url) { err.textContent = 'Esse endereço não parece válido. Cole o link completo, como https://site.com/livro.'; form.elements.url.focus(); return; }
+    const b = this.book;
+    if ((b.links || []).some((l) => l.url === url)) { err.textContent = 'Esse link já está salvo neste livro.'; return; }
+    const label = form.elements.label.value.trim();
+    store.updateBook(b.id, { links: [...(b.links || []), { id: uid(), label, url }] });
+    this.renderMyLinks();
+    const input = this.info.querySelector('[data-link-form] input[name="label"]');
+    if (input) input.focus();
+  }
+
+  removeLink(linkId) {
+    const b = this.book;
+    store.updateBook(b.id, { links: (b.links || []).filter((l) => l.id !== linkId) });
+    this.renderMyLinks();
   }
 
   readHtml(ins) {
@@ -283,6 +336,8 @@ export class BookView {
     if (tabBtn) { this.switchTab(tabBtn.dataset.tab); return; }
     const addBtn = e.target.closest('[data-add-similar]');
     if (addBtn) { this.addSimilar(addBtn); return; }
+    const rm = e.target.closest('[data-remove-link]');
+    if (rm) { this.removeLink(rm.dataset.removeLink); return; }
     const el = e.target.closest('[data-act],[data-status]');
     if (!el || !this.id) return;
     if (el.dataset.status) {

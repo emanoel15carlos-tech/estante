@@ -267,6 +267,7 @@ export function addBook(data) {
     coverTried: true,
     source: data.source || 'manual',
     link: data.link || '',
+    links: data.links || [],
     status: data.status || null,
     addedAt: Date.now(),
   });

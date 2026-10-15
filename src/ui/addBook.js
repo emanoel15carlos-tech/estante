@@ -4,7 +4,7 @@ import * as store from '../lib/store.js';
 import { completeBook, searchBooks, SOURCE_LABEL } from '../lib/apis.js';
 import { suggestSection, translateCategory } from '../lib/categories.js';
 import { averageColor, fileToCover, loadCorsImage } from '../lib/covers.js';
-import { cleanIsbn, esc } from '../lib/util.js';
+import { cleanIsbn, esc, normalizeUrl, uid } from '../lib/util.js';
 
 function sectionOptions(selected) {
   return store.getState().sections
@@ -178,6 +178,7 @@ export class AddBook {
           </label>
         </div>
         <label class="field new-section" hidden><span class="field-label">Nome da nova seção</span><input data-newsection value="${esc(fromApi)}"></label>
+        <label class="field"><span class="field-label">Onde encontrar <span class="opt">(opcional)</span></span><input data-link inputmode="url" placeholder="Cole um link: loja, arquivo, biblioteca…" autocomplete="off"></label>
         <p class="form-error" role="alert"></p>
         <button type="button" class="btn btn-solid btn-wide" data-confirm>Colocar na estante</button>
       </div>`);
@@ -199,6 +200,9 @@ export class AddBook {
     const err = li.querySelector('.form-error');
     const sectionId = resolveSection(li.querySelector('[data-section]').value, li.querySelector('[data-newsection]').value);
     if (!sectionId) { err.textContent = 'Dê um nome para a nova seção.'; return; }
+    const rawLink = li.querySelector('[data-link]').value.trim();
+    const link = rawLink ? normalizeUrl(rawLink) : null;
+    if (rawLink && !link) { err.textContent = 'O link não parece válido. Cole o endereço completo, como https://site.com/livro.'; return; }
     btn.disabled = true;
     btn.textContent = 'Buscando capa e sinopse…';
     let full = r;
@@ -209,6 +213,7 @@ export class AddBook {
       ...colors,
       sectionId,
       status: li.querySelector('[data-status]').value || null,
+      links: link ? [{ id: uid(), label: '', url: link }] : [],
       coverSource: full.cover ? (full.cover.includes('openlibrary') ? 'openlibrary' : full.cover.includes('google') ? 'google' : full.source) : null,
     });
     this.lastAdded = book.id;
@@ -245,6 +250,9 @@ export class AddBook {
     const sectionId = resolveSection(el.section.value, el.newSection.value);
     if (!sectionId) { err.textContent = 'Dê um nome para a nova seção.'; el.newSection.focus(); return; }
     if (store.findDuplicate({ title, authors, isbn })) { err.textContent = 'Esse livro já está na sua estante.'; return; }
+    const rawLink = el.link.value.trim();
+    const link = rawLink ? normalizeUrl(rawLink) : null;
+    if (rawLink && !link) { err.textContent = 'O link não parece válido. Cole o endereço completo, como https://site.com/livro.'; el.link.focus(); return; }
     err.textContent = '';
     const colors = await spineColors(this.manualCover);
     const book = store.addBook({
@@ -256,6 +264,7 @@ export class AddBook {
       cover: this.manualCover,
       coverSource: this.manualCover ? 'manual' : null,
       source: 'manual',
+      links: link ? [{ id: uid(), label: '', url: link }] : [],
       ...colors,
     });
     this.lastAdded = book.id;

@@ -63,3 +63,20 @@ export function yearOf(v) {
   const m = s.match(/\d{4}/);
   return m && s.length <= 10 ? m[0] : s;
 }
+
+/** Accepts "site.com/x" or a full address; returns a clean http(s) URL or null. */
+export function normalizeUrl(input) {
+  let v = String(input || '').trim();
+  if (!v) return null;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(v)) v = 'https://' + v;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (!u.hostname.includes('.')) return null;
+    return u.href;
+  } catch (e) {
+    return null;
+  }
+}
+
+export const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return url; } };

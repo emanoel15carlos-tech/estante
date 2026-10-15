@@ -68,3 +68,12 @@ test('util helpers', () => {
   assert.equal(yearOf('2019-08-01'), '2019');
   assert.equal(yearOf('séc. II'), 'séc. II');
 });
+
+import { normalizeUrl } from '../src/lib/util.js';
+test('personal links are validated', () => {
+  assert.equal(normalizeUrl('site.com/livro'), 'https://site.com/livro');
+  assert.equal(normalizeUrl('http://exemplo.org'), 'http://exemplo.org/');
+  assert.equal(normalizeUrl('javascript:alert(1)'), null);
+  assert.equal(normalizeUrl('nada'), null);
+  assert.equal(normalizeUrl(''), null);
+});
