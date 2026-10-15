@@ -19,10 +19,13 @@ const DEFAULT_SECTIONS = [
   { id: 'fi', name: 'Filosofia & ideias' },
   { id: 'po', name: 'Poesia & teatro' },
   { id: 'av', name: 'Aventura & mistério' },
+  { id: 'fn', name: 'Fantasia' },
+  { id: 'in', name: 'Infantil & juvenil' },
+  { id: 'sf', name: 'Ficção científica' },
 ];
 
 // Bump when the starting collection grows: older saved collections receive the new books.
-const SEED_VERSION = 2;
+const SEED_VERSION = 3;
 
 // [title, author, year, section, synopsis, Open Library cover id]
 // Order matters: a book's id is "seed-<index>", so new books are only ever appended.
@@ -84,8 +87,41 @@ const SEED = [
   ['O Conde de Monte Cristo', 'Alexandre Dumas', '1844', 'av', 'Preso injustamente, Edmond Dantès foge, encontra uma fortuna escondida e volta para se vingar de quem o traiu.', 14566393],
   ['O Cão dos Baskervilles', 'Arthur Conan Doyle', '1902', 'av', 'Sherlock Holmes investiga a lenda de um cão sobrenatural que assombra a família Baskerville.', 8063264],
   ['Um Estudo em Vermelho', 'Arthur Conan Doyle', '1887', 'av', 'A primeira aventura de Sherlock Holmes e do dr. Watson, que se conhecem e investigam um assassinato em Londres.', 13405534],
+  // Added in SEED_VERSION 3
+  ["O Hobbit", "J. R. R. Tolkien", "1937", "fn", "Bilbo Bolseiro é arrastado por um mago e treze anões numa jornada para recuperar o tesouro guardado pelo dragão Smaug.", 14627509],
+  ["A Sociedade do Anel", "J. R. R. Tolkien", "1954", "fn", "Frodo herda um anel de poder e parte com oito companheiros para destruí-lo antes que o Senhor do Escuro o recupere.", 14627060],
+  ["O Leão, a Feiticeira e o Guarda-Roupa", "C. S. Lewis", "1950", "fn", "Quatro irmãos atravessam um guarda-roupa e chegam a Nárnia, presa num inverno eterno pela Feiticeira Branca.", 8441376],
+  ["Harry Potter e a Pedra Filosofal", "J. K. Rowling", "1997", "fn", "No aniversário de onze anos, Harry descobre que é bruxo e vai estudar em Hogwarts, onde o passado dos pais começa a se revelar.", 15155833],
+  ["O Feiticeiro de Terramar", "Ursula K. Le Guin", "1968", "fn", "O jovem Ged, aprendiz de mago, liberta por orgulho uma sombra que passa a persegui-lo pelas ilhas de Terramar.", 13617691],
+  ["O Nome do Vento", "Patrick Rothfuss", "2007", "fn", "Kvothe, hoje um discreto estalajadeiro, conta como passou de órfão de rua a lenda da Universidade de magia.", 11480483],
+  ["A Guerra dos Tronos", "George R. R. Martin", "1996", "fn", "Famílias nobres disputam o Trono de Ferro dos Sete Reinos enquanto uma ameaça antiga desperta além da Muralha.", 9269962],
+  ["O Último Desejo", "Andrzej Sapkowski", "1993", "fn", "Contos que apresentam Geralt de Rívia, caçador de monstros que vive entre pessoas que o temem e precisam dele.", 7360819],
+  ["Deuses Americanos", "Neil Gaiman", "2001", "fn", "Ao sair da prisão, Shadow é contratado por um homem misterioso envolvido numa guerra entre deuses antigos e novos.", 8494659],
+  ["As Brumas de Avalon", "Marion Zimmer Bradley", "1983", "fn", "A lenda do rei Artur contada pelas mulheres que viveram nela, sobretudo a sacerdotisa Morgana.", 96817],
+  ["O Pequeno Príncipe", "Antoine de Saint-Exupéry", "1943", "in", "Um piloto perdido no deserto conhece um pequeno príncipe vindo de outro planeta, que fala de amizade e do que é essencial.", 10708272],
+  ["Reinações de Narizinho", "Monteiro Lobato", "1931", "in", "As primeiras aventuras de Narizinho, Pedrinho e da boneca Emília no Sítio do Picapau Amarelo.", 8198773],
+  ["Peter Pan", "J. M. Barrie", "1911", "in", "Wendy e os irmãos voam com Peter Pan para a Terra do Nunca, onde ninguém cresce e o capitão Gancho os espera.", 8237052],
+  ["As Aventuras de Pinóquio", "Carlo Collodi", "1883", "in", "Um boneco de madeira ganha vida e aprende, entre mentiras e trapalhadas, o que é ser um menino de verdade.", 8597022],
+  ["O Mágico de Oz", "L. Frank Baum", "1900", "in", "Um ciclone leva Dorothy até a terra de Oz, onde ela segue a estrada de tijolos amarelos para voltar para casa.", 552443],
+  ["A Bolsa Amarela", "Lygia Bojunga", "1976", "in", "Raquel esconde numa bolsa amarela três grandes vontades: crescer logo, ser menino e virar escritora.", 13470796],
+  ["Contos de Grimm", "Jacob e Wilhelm Grimm", "1812", "in", "Histórias populares alemãs reunidas pelos irmãos Grimm, como Branca de Neve, Rapunzel e João e Maria.", 8236293],
+  ["Contos de Andersen", "Hans Christian Andersen", "1835", "in", "Contos como A Pequena Sereia, O Patinho Feio e A Roupa Nova do Imperador.", 320591],
+  ["Matilda", "Roald Dahl", "1988", "in", "Uma menina genial, ignorada pelos pais, enfrenta a terrível diretora da escola com a ajuda de poderes inesperados.", 12889769],
+  ["Coraline", "Neil Gaiman", "2002", "in", "Coraline encontra uma porta para uma versão perfeita da própria casa, onde uma Outra Mãe quer que ela fique para sempre.", 14171421],
+  ["O Menino Maluquinho", "Ziraldo", "1980", "in", "O dia a dia de um menino alegre e cheio de ideias, que anda com uma panela na cabeça.", 15182462],
+  ["1984", "George Orwell", "1949", "sf", "Winston Smith reescreve a história para um regime que vigia tudo, até se apaixonar e decidir resistir.", 9267242],
+  ["Admirável Mundo Novo", "Aldous Huxley", "1932", "sf", "Numa sociedade que fabrica pessoas em laboratório e as mantém felizes com uma droga, um homem criado fora dela chega para desafiá-la.", 8231823],
+  ["Fahrenheit 451", "Ray Bradbury", "1953", "sf", "Guy Montag é um bombeiro cujo trabalho é queimar livros, até o dia em que começa a ler um deles.", 12993656],
+  ["Duna", "Frank Herbert", "1965", "sf", "Paul Atreides chega ao planeta desértico Arrakis, única fonte da substância mais valiosa do universo, e vira peça central de uma guerra.", 11481354],
+  ["Fundação", "Isaac Asimov", "1951", "sf", "Um matemático prevê a queda do Império Galáctico e cria uma fundação para encurtar a idade das trevas que virá.", 14612610],
+  ["Eu, Robô", "Isaac Asimov", "1950", "sf", "Contos sobre robôs regidos pelas Três Leis da Robótica e os dilemas inesperados que essas leis criam.", 12385229],
+  ["O Guia do Mochileiro das Galáxias", "Douglas Adams", "1979", "sf", "Minutos antes de a Terra ser demolida, Arthur Dent é salvo por um amigo que, ele descobre, é alienígena.", 12986869],
+  ["Neuromancer", "William Gibson", "1984", "sf", "Um hacker decadente é contratado para um último trabalho no ciberespaço, num futuro dominado por corporações.", 283860],
+  ["A Mão Esquerda da Escuridão", "Ursula K. Le Guin", "1969", "sf", "Um enviado humano tenta convencer o planeta gelado de Gethen, cujos habitantes não têm sexo fixo, a se unir a uma aliança de mundos.", 10618463],
+  ["Solaris", "Stanisław Lem", "1961", "sf", "Cientistas que estudam um oceano vivo num planeta distante começam a receber visitas de pessoas do próprio passado.", 12313764],
 ];
-const SEED_V1_COUNT = 20;
+// How many starting books each version had, so older collections only receive what is new.
+const SEED_COUNTS = { 1: 20, 2: 56 };
 
 // Original titles of translated works, used to find them in the catalogues.
 const ORIGINAL = {
@@ -127,6 +163,34 @@ const ORIGINAL = {
   53: ["The Count of Monte Cristo", "Alexandre Dumas"],
   54: ["The Hound of the Baskervilles", "Arthur Conan Doyle"],
   55: ["A Study in Scarlet", "Arthur Conan Doyle"],
+  56: ["The Hobbit", "Tolkien"],
+  57: ["The Fellowship of the Ring", "Tolkien"],
+  58: ["The Lion, the Witch and the Wardrobe", "C. S. Lewis"],
+  59: ["Harry Potter and the Philosopher's Stone", "Rowling"],
+  60: ["A Wizard of Earthsea", "Le Guin"],
+  61: ["The Name of the Wind", "Rothfuss"],
+  62: ["A Game of Thrones", "George R. R. Martin"],
+  63: ["The Last Wish", "Sapkowski"],
+  64: ["American Gods", "Neil Gaiman"],
+  65: ["The Mists of Avalon", "Marion Zimmer Bradley"],
+  66: ["Le Petit Prince", "Saint-Exupéry"],
+  68: ["Peter Pan", "Barrie"],
+  69: ["Le avventure di Pinocchio", "Collodi"],
+  70: ["The Wonderful Wizard of Oz", "Baum"],
+  72: ["Grimm's Fairy Tales", "Grimm"],
+  73: ["Andersen's Fairy Tales", "Andersen"],
+  74: ["Matilda", "Roald Dahl"],
+  75: ["Coraline", "Neil Gaiman"],
+  77: ["Nineteen Eighty-Four", "George Orwell"],
+  78: ["Brave New World", "Aldous Huxley"],
+  79: ["Fahrenheit 451", "Ray Bradbury"],
+  80: ["Dune", "Frank Herbert"],
+  81: ["Foundation", "Isaac Asimov"],
+  82: ["I, Robot", "Isaac Asimov"],
+  83: ["The Hitchhiker's Guide to the Galaxy", "Douglas Adams"],
+  84: ["Neuromancer", "William Gibson"],
+  85: ["The Left Hand of Darkness", "Le Guin"],
+  86: ["Solaris", "Stanisław Lem"],
 };
 
 
@@ -195,7 +259,7 @@ function migrate(data) {
     for (const s of DEFAULT_SECTIONS) {
       if (!data.sections.some((x) => x.id === s.id)) data.sections.push({ ...s });
     }
-    for (let i = SEED_V1_COUNT; i < SEED.length; i++) {
+    for (let i = SEED_COUNTS[data.seedVersion || 1] || 20; i < SEED.length; i++) {
       if (!ids.has('seed-' + i)) data.books.push(seedBook(i));
     }
     data.seedVersion = SEED_VERSION;

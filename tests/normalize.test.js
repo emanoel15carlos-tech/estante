@@ -5,6 +5,9 @@ import { suggestSection, translateCategory } from '../src/lib/categories.js';
 import { isIsbn, cleanIsbn, stripHtml, yearOf } from '../src/lib/util.js';
 
 const sections = [
+  { id: 'in', name: 'Infantil & juvenil' },
+  { id: 'sf', name: 'Ficção científica' },
+  { id: 'fn', name: 'Fantasia' },
   { id: 'br', name: 'Literatura brasileira' },
   { id: 'cl', name: 'Clássicos do mundo' },
   { id: 'fa', name: 'Fantástico & horror' },
@@ -76,4 +79,10 @@ test('personal links are validated', () => {
   assert.equal(normalizeUrl('javascript:alert(1)'), null);
   assert.equal(normalizeUrl('nada'), null);
   assert.equal(normalizeUrl(''), null);
+});
+
+test('new sections are suggested from API categories', () => {
+  assert.equal(suggestSection({ categories: ['Juvenile Fiction / Animals'], title: 'x' }, sections), 'in');
+  assert.equal(suggestSection({ categories: ['Fiction / Science Fiction / Space Opera'], title: 'x' }, sections), 'sf');
+  assert.equal(suggestSection({ categories: ['Fiction / Fantasy / Epic'], title: 'x' }, sections), 'fn');
 });

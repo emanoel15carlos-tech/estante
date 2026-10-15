@@ -59,6 +59,9 @@ export function translateCategory(cats) {
 
 // Keywords that point a book to one of the default sections.
 const RULES = [
+  { section: 'in', words: ['juvenile', 'children', 'infantil', 'infantojuvenil', 'picture book', 'fairy tales', 'contos de fadas', 'nursery'] },
+  { section: 'sf', words: ['science fiction', 'ficcao cientifica', 'dystopia', 'distopia', 'robots', 'space opera', 'cyberpunk', 'time travel', 'extraterrestrial'] },
+  { section: 'fn', words: ['fantasy', 'fantasia', 'magic', 'magia', 'dragons', 'dragoes', 'wizards', 'elves', 'epic fantasy'] },
   { section: 'fa', words: ['fantasy', 'fantasia', 'horror', 'terror', 'science fiction', 'ficcao cientifica', 'gothic', 'vampire', 'ghost', 'supernatural', 'dystopia', 'magic'] },
   { section: 'fi', words: ['philosophy', 'filosofia', 'political', 'politica', 'science', 'ciencia', 'economics', 'history', 'historia', 'sociology', 'ethics', 'evolution', 'essays', 'ensaio', 'psychology', 'strategy'] },
   { section: 'br', words: ['brazil', 'brasil', 'literatura brasileira', 'brazilian'] },
