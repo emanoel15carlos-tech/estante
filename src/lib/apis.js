@@ -114,12 +114,28 @@ export function normalizeGoogle(item) {
   };
 }
 
+// Without an API key, Google Books shares one daily quota among every site that
+// calls it keyless. Once it answers 429, skip it for the rest of the session.
+let googleDown = false;
+export const googleUnavailable = () => googleDown;
+
 export async function searchGoogle(query, { signal, limit = 12 } = {}) {
+  if (googleDown) {
+    const err = new Error('Google Books indisponível');
+    err.status = 429;
+    throw err;
+  }
   const q = isIsbn(query) ? 'isbn:' + cleanIsbn(query) : query.trim();
   const params = new URLSearchParams({ q, maxResults: String(limit), printType: 'books', country: 'BR' });
   if (GOOGLE_KEY) params.set('key', GOOGLE_KEY);
   return cached('g:' + params.toString(), async () => {
-    const data = await getJson(GOOGLE + '?' + params, { signal });
+    let data;
+    try {
+      data = await getJson(GOOGLE + '?' + params, { signal });
+    } catch (e) {
+      if (e.status === 429 || e.status === 403) googleDown = true;
+      throw e;
+    }
     return ((data && data.items) || []).map(normalizeGoogle).filter((b) => b.title);
   });
 }
@@ -229,7 +245,7 @@ export async function searchBooks(query, { signal, onStatus = () => {} } = {}) {
   const push = (list) => list.forEach((b) => { const k = key(b); if (!seen.has(k)) { seen.add(k); results.push(b); } });
 
   const isbnQuery = isIsbn(query);
-  onStatus('Buscando no Google Books…');
+  onStatus(googleDown ? 'Buscando na Open Library…' : 'Buscando no Google Books…');
   const tasks = [searchGoogle(query, { signal }).catch((e) => { errors.push(['google', e]); return []; })];
   if (isbnQuery) tasks.push(lookupBrasilApi(query, { signal }).catch((e) => { errors.push(['brasilapi', e]); return null; }));
   const [google, brasil] = await Promise.all(tasks);
@@ -237,7 +253,9 @@ export async function searchBooks(query, { signal, onStatus = () => {} } = {}) {
   if (brasil) push([brasil]);
 
   if (results.length < 3) {
-    onStatus(results.length ? 'Completando com a Open Library…' : 'Nada no Google Books. Tentando a Open Library…');
+    onStatus(googleDown
+      ? 'O Google Books atingiu o limite de consultas de hoje. Buscando na Open Library…'
+      : results.length ? 'Completando com a Open Library…' : 'Nada no Google Books. Tentando a Open Library…');
     const ol = await searchOpenLibrary(query, { signal }).catch((e) => { errors.push(['openlibrary', e]); return []; });
     push(ol);
   }
@@ -286,7 +304,7 @@ export async function completeBook(b, { signal } = {}) {
 /** Best cover for a title/author pair (used to dress the initial collection). */
 export async function findCover(title, author, { signal } = {}) {
   const q = `intitle:${title}` + (author ? ` inauthor:${author}` : '');
-  const list = await searchGoogle(q, { signal, limit: 5 }).catch(() => []);
+  const list = googleDown ? [] : await searchGoogle(q, { signal, limit: 5 }).catch(() => []);
   for (const b of list) {
     if (b.cover && (await probeImage(b.cover))) return { cover: b.cover, source: 'google' };
     if (b.coverFallback && (await probeImage(b.coverFallback))) return { cover: b.coverFallback, source: 'google' };

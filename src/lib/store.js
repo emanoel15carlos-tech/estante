@@ -19,6 +19,10 @@ const DEFAULT_SECTIONS = [
   { id: 'fi', name: 'Filosofia & ideias' },
 ];
 
+// Open Library cover ids for the starting collection, in the same order as SEED.
+const SEED_COVERS = [647501, 123152, 10792439, 2664651, 12746439, 15203760, 14428305, 14348537, 10544254, 9411873, 10570452, 12356249, 12216503, 295773, 12820198, 10527843, 4849549, 15142439, 13264786, 7153600];
+const seedCover = (i) => (SEED_COVERS[i] ? `https://covers.openlibrary.org/b/id/${SEED_COVERS[i]}-L.jpg` : null);
+
 const SEED = [
   ['Dom Casmurro', 'Machado de Assis', '1899', 'br', 'Bentinho, já velho, revisita a própria vida e o ciúme que o fez duvidar de Capitu. O leitor nunca sabe ao certo em quem acreditar.'],
   ['Memórias Póstumas de Brás Cubas', 'Machado de Assis', '1881', 'br', 'Um defunto autor conta a própria vida com ironia e sem pressa, do berço ao túmulo, rindo de si e da sociedade do seu tempo.'],
@@ -69,9 +73,9 @@ function seed() {
         sectionId: section,
         synopsis,
         isbn: '',
-        cover: null,
-        coverSource: null,
-        coverTried: false,
+        cover: seedCover(i),
+        coverSource: seedCover(i) ? 'openlibrary' : null,
+        coverTried: true,
         source: 'seed',
         status: null,
         addedAt: 0,
@@ -88,7 +92,16 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      if (data && Array.isArray(data.books) && Array.isArray(data.sections)) return data;
+      if (data && Array.isArray(data.books) && Array.isArray(data.sections)) {
+        // Collections saved before the covers were bundled: give the starting books their covers.
+        data.books = data.books.map((b) => {
+          const m = /^seed-(\d+)$/.exec(b.id);
+          if (!m || b.cover) return b;
+          const cover = seedCover(+m[1]);
+          return cover ? { ...b, cover, coverSource: 'openlibrary', coverTried: true } : b;
+        });
+        return data;
+      }
     }
   } catch (e) { /* corrupted or blocked storage: start fresh */ }
   return seed();
