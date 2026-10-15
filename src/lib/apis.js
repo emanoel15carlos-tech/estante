@@ -360,9 +360,18 @@ export async function bookInsights(book, { signal } = {}) {
     const data = await getJson(OL + '/search.json?' + params, { signal, timeout: 15000 });
     const docs = (data && data.docs) || [];
     const want = titleKey(searchTitle);
-    // Among the works whose title matches, take the one with the most editions (the canonical work).
-    const matches = docs.filter((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); });
-    const doc = (matches.length ? matches : docs).slice().sort((a, b) => (b.edition_count || 0) - (a.edition_count || 0))[0];
+    // Pick the canonical work. Translated classics are often catalogued under the
+    // original-language title (Преступление и наказание), so a title match alone
+    // is not enough: among the author's works, a title match wins unless another
+    // work by the same author has far more editions.
+    const root = titleKey(String(author).split(' ').pop()).slice(0, 5);
+    const byAuthor = docs.filter((d) => root && titleKey((d.author_name || []).join(' ')).includes(root));
+    const pool = byAuthor.length ? byAuthor : docs;
+    const eds = (d) => d.edition_count || 0;
+    const most = pool.slice().sort((a, b) => eds(b) - eds(a))[0];
+    const titled = pool.filter((d) => { const t = titleKey(d.title); return t && (t.includes(want) || want.includes(t)); })
+      .sort((a, b) => eds(b) - eds(a))[0];
+    const doc = titled && (!most || eds(titled) >= eds(most) * 0.2) ? titled : most;
     if (!doc) return null;
 
     const subjects = doc.subject || [];
