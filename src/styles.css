@@ -304,3 +304,5 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .similar { grid-template-columns: minmax(0, 1fr); }
 }
+.lists-slot { display: flex; flex-direction: column; gap: 18px; }
+.lists-slot:empty { display: none; }

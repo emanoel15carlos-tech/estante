@@ -2,7 +2,7 @@
 // cover, opened on demand, and flown back to its slot when closed.
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
-import { SOURCE_LABEL, bookInsights, similarBooks } from '../lib/apis.js';
+import { SOURCE_LABEL, bookInsights, readerLists, similarBooks } from '../lib/apis.js';
 import { esc } from '../lib/util.js';
 
 const STATUS = [
@@ -160,6 +160,7 @@ export class BookView {
     this.panel('temas').innerHTML = this.topicsHtml(ins);
     this.panel('parecidos').innerHTML = '<p class="bv-loading">Buscando livros com o mesmo tema…</p>';
     if (this.tab === 'parecidos') this.loadSimilar();
+    this.loadLists(ins.key, id);
   }
 
   readHtml(ins) {
@@ -176,7 +177,7 @@ export class BookView {
   readersHtml(ins) {
     const stat = (label, value, extra = '') => `<div><dt>${label}</dt><dd>${value}${extra}</dd></div>`;
     const stats = [
-      ins.rating ? stat('Nota média', ins.rating.toString().replace('.', ','), `<span>/5 · ${nf.format(ins.ratingCount)} ${ins.ratingCount === 1 ? 'avaliação' : 'avaliações'}</span>`) : '',
+      ins.rating ? stat('Nota média', ins.rating.toFixed(1).replace('.', ','), `<span>/5 · ${nf.format(ins.ratingCount)} ${ins.ratingCount === 1 ? 'avaliação' : 'avaliações'}</span>`) : '',
       stat('Querem ler', nf.format(ins.want)),
       stat('Lendo agora', nf.format(ins.reading)),
       stat('Já leram', nf.format(ins.readCount)),
@@ -186,17 +187,29 @@ export class BookView {
     const recog = ins.recognitions.length
       ? `<h3 class="bv-h">Reconhecimento</h3><ul class="chips">${ins.recognitions.map((r) => `<li class="chip chip-gold">${esc(r)}</li>`).join('')}</ul>`
       : '';
-    const lists = ins.lists.total
-      ? `<h3 class="bv-h">Quem recomenda</h3>
-         <p class="bv-text">Aparece em ${nf.format(ins.lists.total)} ${ins.lists.total === 1 ? 'lista' : 'listas'} de leitores da Open Library${ins.lists.notable.length ? ', entre elas:' : '.'}</p>
-         ${ins.lists.notable.length ? `<ul class="lists">${ins.lists.notable.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.name)}${ICON_OUT}</a><span>${nf.format(l.count)} livros na lista</span></li>`).join('')}</ul>` : ''}`
-      : '';
+    const lists = '<div class="lists-slot"><h3 class="bv-h">Quem recomenda</h3><p class="bv-loading">Buscando listas de leitores…</p></div>';
     return `<dl class="stats">${stats}</dl>
       ${recog}
       ${lists}
       <h3 class="bv-h">Resenhas e opiniões</h3>
       <div class="row ext-row">${ext(ins.goodreads, 'Resenhas no Goodreads')}${ext(ins.wikipedia, 'Artigo na Wikipédia')}</div>
       <p class="bv-note">Números da comunidade da Open Library, atualizados por ela.</p>`;
+  }
+
+  async loadLists(key, id) {
+    let lists = null;
+    try { lists = await readerLists(key); } catch (e) { lists = null; }
+    if (this.id !== id) return;
+    const slot = this.info.querySelector('.lists-slot');
+    if (!slot) return;
+    if (!lists || !lists.total) {
+      slot.innerHTML = lists ? '' : '<h3 class="bv-h">Quem recomenda</h3><p class="bv-loading">As listas de leitores não responderam agora.</p>';
+      return;
+    }
+    slot.innerHTML = `<h3 class="bv-h">Quem recomenda</h3>
+      <p class="bv-text">Aparece em ${nf.format(lists.total)} ${lists.total === 1 ? 'lista' : 'listas'} de leitores da Open Library${lists.notable.length ? ', entre elas:' : '.'}</p>
+      ${lists.notable.length ? `<ul class="lists">${lists.notable.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.name)}${ICON_OUT}</a><span>${nf.format(l.count)} livros na lista</span></li>`).join('')}</ul>` : ''}`;
+    if (!this.reduce) gsap.from(slot, { opacity: 0, duration: 0.3 });
   }
 
   topicsHtml(ins) {

@@ -327,7 +327,7 @@ const INSIGHT_FIELDS = [
 ].join(',');
 
 // Subjects that are catalogue housekeeping rather than what the book is about.
-const NOISE_SUBJECT = /^(accessible book|protected daisy|in library|lending library|large type books|open_syllabus_project|internet archive wishlist|overdrive|nyt:|award:|great_books_of_the_western_world|fiction$|literature$|general$|translations into|reading level|textbooks|ficção$|romance$|english language)/i;
+const NOISE_SUBJECT = /^(open library staff picks|accessible book|protected daisy|in library|lending library|large type books|open_syllabus_project|internet archive wishlist|overdrive|nyt:|award:|great_books_of_the_western_world|fiction$|literature$|general$|translations into|reading level|textbooks|ficção$|romance$|english language)/i;
 
 // Subjects that record a recommendation or distinction.
 function recognitionsFrom(subjects) {
@@ -336,6 +336,7 @@ function recognitionsFrom(subjects) {
     if (s === 'great_books_of_the_western_world') out.push('Coleção Great Books of the Western World, da Encyclopaedia Britannica');
     else if (/^nyt:/i.test(s) || /new york times best/i.test(s)) out.push('Lista de mais vendidos do New York Times');
     else if (/^open_syllabus_project$/i.test(s)) out.push('Indicado em programas de cursos universitários (Open Syllabus)');
+    else if (/^open library staff picks$/i.test(s)) out.push('Escolha da equipe da Open Library');
     else {
       const m = /^award:([^=]+)(?:=(.+))?$/i.exec(s);
       if (m) out.push('Prêmio ' + m[1].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) + (m[2] ? ` (${m[2]})` : ''));
@@ -369,19 +370,6 @@ export async function bookInsights(book, { signal } = {}) {
     if (doc.ebook_access === 'borrowable' && doc.lending_edition_s) read.push({ kind: 'borrow', label: 'Pegar emprestado na Open Library', note: 'Empréstimo digital gratuito por tempo limitado, com conta na Open Library.', url: `${OL}/books/${doc.lending_edition_s}` });
     if (doc.key) read.push({ kind: 'info', label: 'Ver todas as edições na Open Library', note: `${doc.edition_count || 'Várias'} edições cadastradas, em vários idiomas.`, url: OL + doc.key });
 
-    let lists = { total: 0, notable: [] };
-    if (doc.key) {
-      try {
-        await olThrottle();
-        const l = await getJson(`${OL}${doc.key}/lists.json?limit=100`, { signal, timeout: 15000 });
-        const entries = (l && l.entries) || [];
-        lists = {
-          total: (l && l.size) || entries.length,
-          notable: entries.filter((e) => e.name && NOTABLE_LIST.test(e.name)).slice(0, 6).map((e) => ({ name: e.name.trim(), url: OL + e.url, count: e.seed_count || 0 })),
-        };
-      } catch (e) { /* lists are optional */ }
-    }
-
     const authorName = (doc.author_name || [])[0] || author;
     return {
       key: doc.key || '',
@@ -395,7 +383,6 @@ export async function bookInsights(book, { signal } = {}) {
       reading: doc.currently_reading_count || 0,
       readCount: doc.already_read_count || 0,
       read,
-      lists,
       recognitions: recognitionsFrom(subjects),
       subjects: subjects.filter((s) => !NOISE_SUBJECT.test(s) && s.length < 60).slice(0, 14),
       people: (doc.person || []).filter((p) => !p.includes(authorName.split(' ').pop() || '§')).slice(0, 10),
@@ -403,6 +390,19 @@ export async function bookInsights(book, { signal } = {}) {
       times: (doc.time || []).slice(0, 4),
       goodreads: `https://www.goodreads.com/search?q=${encodeURIComponent(`${book.title} ${author}`)}`,
       wikipedia: `https://pt.wikipedia.org/w/index.php?search=${encodeURIComponent(book.title + ' ' + author)}`,
+    };
+  });
+}
+
+/** Reader lists that include the work. This endpoint is slow, so it loads after the rest. */
+export async function readerLists(workKey, { signal } = {}) {
+  if (!workKey) return { total: 0, notable: [] };
+  return cached('lists:' + workKey, async () => {
+    const l = await getJson(`${OL}${workKey}/lists.json?limit=50`, { signal, timeout: 40000 });
+    const entries = (l && l.entries) || [];
+    return {
+      total: (l && l.size) || entries.length,
+      notable: entries.filter((e) => e.name && NOTABLE_LIST.test(e.name)).slice(0, 6).map((e) => ({ name: e.name.trim(), url: OL + e.url, count: e.seed_count || 0 })),
     };
   });
 }
