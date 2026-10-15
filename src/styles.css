@@ -306,3 +306,8 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 }
 .lists-slot { display: flex; flex-direction: column; gap: 18px; }
 .lists-slot:empty { display: none; }
+.pt-slot { display: flex; flex-direction: column; gap: 10px; }
+.other-langs { border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.other-langs summary { cursor: pointer; color: var(--text-2); font-size: 15px; min-height: 32px; }
+.other-langs summary:hover { color: var(--text); }
+.other-langs .sources { margin-top: 10px; }

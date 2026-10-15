@@ -2,7 +2,7 @@
 // cover, opened on demand, and flown back to its slot when closed.
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
-import { SOURCE_LABEL, bookInsights, readerLists, similarBooks } from '../lib/apis.js';
+import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
 import { esc } from '../lib/util.js';
 
 const STATUS = [
@@ -161,17 +161,39 @@ export class BookView {
     this.panel('parecidos').innerHTML = '<p class="bv-loading">Buscando livros com o mesmo tema…</p>';
     if (this.tab === 'parecidos') this.loadSimilar();
     this.loadLists(ins.key, id);
+    this.loadPortuguese(b, ins, id);
   }
 
   readHtml(ins) {
-    const items = ins.read.map((r) => `<li class="src src-${r.kind}">
+    const item = (r) => `<li class="src src-${r.kind}">
         <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(r.label)}</strong>${ICON_OUT}</a>
         <span>${esc(r.note)}</span>
-      </li>`).join('');
-    const free = ins.read.some((r) => r.kind !== 'info');
-    return `${free ? '' : '<p class="bv-note">Não há edição digital gratuita desta obra nas fontes consultadas. Livros recentes costumam estar protegidos por direitos autorais.</p>'}
-      <ul class="sources">${items}</ul>
+      </li>`;
+    return `<h3 class="bv-h">Em português</h3>
+      <div class="pt-slot"><p class="bv-loading">Procurando edições em português no Internet Archive…</p></div>
+      ${ins.other.length ? `<details class="other-langs"><summary>Edições em outros idiomas</summary><ul class="sources">${ins.other.map(item).join('')}</ul></details>` : ''}
       <p class="bv-note">Só listamos fontes legais: obras em domínio público e empréstimo digital de bibliotecas.</p>`;
+  }
+
+  async loadPortuguese(b, ins, id) {
+    let list = null;
+    try { list = await portugueseEditions(b); } catch (e) { list = null; }
+    if (this.id !== id) return;
+    const slot = this.info.querySelector('.pt-slot');
+    if (!slot) return;
+    const old = ins.firstYear ? ins.firstYear < 1955 : /(^|\D)1[0-8]\d\d|19[0-4]\d|séc|a\.C/.test(String(b.year || ''));
+    const wikisource = `https://pt.wikisource.org/w/index.php?search=${encodeURIComponent(b.title + ' ' + ((b.authors || [])[0] || ''))}`;
+    const rows = (list || []).map((e) => `<li class="src src-download">
+        <a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><strong>Baixar no Internet Archive</strong>${ICON_OUT}</a>
+        <span>${esc(e.title || b.title)}${e.year ? ' · ' + esc(e.year) : ''}${e.downloads ? ' · ' + nf.format(e.downloads) + ' downloads' : ''} · PDF, EPUB e leitura online</span>
+      </li>`);
+    if (old) rows.push(`<li class="src src-download">
+        <a href="${esc(wikisource)}" target="_blank" rel="noopener noreferrer"><strong>Ler no Wikisource em português</strong>${ICON_OUT}</a>
+        <span>Biblioteca livre de textos em domínio público, para ler online ou baixar.</span>
+      </li>`);
+    slot.innerHTML = rows.length
+      ? `<ul class="sources">${rows.join('')}</ul>${list === null ? '<p class="bv-note">O Internet Archive não respondeu agora; tente abrir o livro de novo daqui a pouco.</p>' : ''}<p class="bv-note">As fontes nem sempre distinguem português do Brasil e de Portugal; o título e o ano ajudam a escolher.</p>`
+      : `<p class="bv-text">${list === null ? 'O Internet Archive não respondeu agora. Tente abrir o livro de novo daqui a pouco.' : 'Não encontramos edição digital gratuita em português. Livros recentes costumam estar protegidos por direitos autorais.'}</p>`;
   }
 
   readersHtml(ins) {

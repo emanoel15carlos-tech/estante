@@ -364,11 +364,12 @@ export async function bookInsights(book, { signal } = {}) {
 
     const subjects = doc.subject || [];
     const ia = (doc.ia || []).find((id) => !/^lp_/.test(id)) || (doc.ia || [])[0] || '';
-    const read = [];
-    if (doc.ebook_access === 'public' && ia) read.push({ kind: 'download', label: 'Ler ou baixar no Internet Archive', note: 'Edição digital em domínio público: PDF, EPUB e leitura online.', url: `https://archive.org/details/${ia}` });
-    (doc.id_project_gutenberg || []).slice(0, 1).forEach((id) => read.push({ kind: 'download', label: 'Baixar no Projeto Gutenberg', note: 'EPUB, Kindle e texto, grátis e legal (domínio público).', url: `https://www.gutenberg.org/ebooks/${id}` }));
-    if (doc.ebook_access === 'borrowable' && doc.lending_edition_s) read.push({ kind: 'borrow', label: 'Pegar emprestado na Open Library', note: 'Empréstimo digital gratuito por tempo limitado, com conta na Open Library.', url: `${OL}/books/${doc.lending_edition_s}` });
-    if (doc.key) read.push({ kind: 'info', label: 'Ver todas as edições na Open Library', note: `${doc.edition_count || 'Várias'} edições cadastradas, em vários idiomas.`, url: OL + doc.key });
+    // Links in other languages (the Portuguese ones come from portugueseEditions).
+    const other = [];
+    if (doc.ebook_access === 'public' && ia) other.push({ kind: 'download', label: 'Internet Archive', note: 'Edição em domínio público, idioma conforme a edição.', url: `https://archive.org/details/${ia}` });
+    (doc.id_project_gutenberg || []).slice(0, 1).forEach((id) => other.push({ kind: 'download', label: 'Projeto Gutenberg', note: 'EPUB, Kindle e texto. Geralmente no idioma original.', url: `https://www.gutenberg.org/ebooks/${id}` }));
+    if (doc.ebook_access === 'borrowable' && doc.lending_edition_s) other.push({ kind: 'borrow', label: 'Empréstimo na Open Library', note: 'Empréstimo digital gratuito por tempo limitado, com conta na Open Library.', url: `${OL}/books/${doc.lending_edition_s}` });
+    if (doc.key) other.push({ kind: 'info', label: 'Todas as edições na Open Library', note: `${doc.edition_count || 'Várias'} edições cadastradas, em vários idiomas.`, url: OL + doc.key });
 
     const authorName = (doc.author_name || [])[0] || author;
     return {
@@ -382,7 +383,7 @@ export async function bookInsights(book, { signal } = {}) {
       want: doc.want_to_read_count || 0,
       reading: doc.currently_reading_count || 0,
       readCount: doc.already_read_count || 0,
-      read,
+      other,
       recognitions: recognitionsFrom(subjects),
       subjects: subjects.filter((s) => !NOISE_SUBJECT.test(s) && s.length < 60).slice(0, 14),
       people: (doc.person || []).filter((p) => !p.includes(authorName.split(' ').pop() || '§')).slice(0, 10),
@@ -426,5 +427,40 @@ export async function similarBooks(subject, excludeKey, { signal } = {}) {
         coverLarge: olCoverById(w.cover_id, 'L'),
         link: OL + w.key,
       }));
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Free Portuguese editions on the Internet Archive                      */
+
+const IA_SEARCH = 'https://archive.org/advancedsearch.php';
+const iaTerm = (s) => String(s || '').replace(/[()"':\\[\]{}^~*?!+&|/-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Downloadable Portuguese editions (public domain items only: lending-library
+ * collections are left out). Sorted by number of downloads.
+ */
+export async function portugueseEditions(book, { signal } = {}) {
+  const title = iaTerm(book.title);
+  const surname = iaTerm(String((book.authors || [])[0] || '').split(' ').pop());
+  if (!title) return [];
+  const q = [
+    `title:(${title})`,
+    surname ? `creator:(${surname})` : '',
+    'language:(por OR portuguese OR pt OR "Português")',
+    'mediatype:texts',
+    'NOT collection:(inlibrary OR printdisabled OR lendinglibrary OR internetarchivebooks)',
+  ].filter(Boolean).join(' AND ');
+  const url = `${IA_SEARCH}?q=${encodeURIComponent(q)}&fl[]=identifier&fl[]=title&fl[]=year&fl[]=date&fl[]=creator&fl[]=downloads&sort[]=downloads+desc&rows=6&output=json`;
+  return cached('iapt:' + q, async () => {
+    const data = await getJson(url, { signal, timeout: 20000 });
+    const docs = (data && data.response && data.response.docs) || [];
+    return docs.slice(0, 4).map((d) => ({
+      id: d.identifier,
+      title: Array.isArray(d.title) ? d.title[0] : d.title,
+      year: d.year || (d.date ? String(d.date).slice(0, 4) : ''),
+      downloads: d.downloads || 0,
+      url: `https://archive.org/details/${d.identifier}`,
+    }));
   });
 }
