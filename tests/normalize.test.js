@@ -128,3 +128,31 @@ test('cloud split: links and Drive always private, reading shared unless turned 
   assert.equal(joinState(hidden.pub, hidden.priv).settings.shareReading, false);
   assert.equal(bookKey({ title: 'Dom  Casmurro!', authors: ['Machado de ASSIS'] }), bookKey(state.books[0]));
 });
+
+test('shared Drive file goes public only when the reader allows it', async () => {
+  const { splitState } = await import('../src/lib/cloud.js');
+  const base = { seedVersion: 3, removedSections: [], sections: [], books: [{ id: 'a', title: 'A', drive: { id: 'D' } }] };
+  assert.equal(splitState(base).pub.books[0].drive, undefined);
+  const shared = { ...base, books: [{ ...base.books[0], driveShared: true }] };
+  assert.equal(splitState(shared).pub.books[0].drive.id, 'D');
+});
+
+test('reading stats count books finished this year, the goal and pages this month', async () => {
+  const store = await import('../src/lib/store.js');
+  const now = new Date('2026-10-16T12:00:00Z');
+  const s = {
+    books: [
+      { id: '1', status: 'lido', finishedAt: '2026-03-01T00:00:00Z' },
+      { id: '2', status: 'lido', finishedAt: '2025-12-01T00:00:00Z' },
+      { id: '3', status: 'lendo' },
+    ],
+    settings: { goal: { year: 2026, books: 12 } },
+    pageLog: { '2026-10': 120, '2026-09': 80, '2025-10': 999 },
+  };
+  assert.deepEqual(store.readingStats(s, now), { year: 2026, read: 1, goal: 12, pagesMonth: 120, pagesYear: 200 });
+  assert.equal(store.emptyCollection().books.length, 0);
+  assert.ok(store.emptyCollection().sections.length >= 9);
+  assert.equal(store.isPristine({ books: [{ id: 'seed-1' }] }), true);
+  assert.equal(store.isPristine({ books: [{ id: 'seed-1', status: 'lido' }] }), false);
+  assert.equal(store.isPristine({ books: [{ id: 'x9' }] }), false);
+});

@@ -4,6 +4,7 @@ import * as cloud from '../lib/cloud.js';
 import * as store from '../lib/store.js';
 import { esc } from '../lib/util.js';
 import { stars, when } from './bookView.js';
+import * as social from './social.js';
 
 const nf = new Intl.NumberFormat('pt-BR');
 
@@ -34,8 +35,9 @@ function message(e) {
 }
 
 export class Readers {
-  constructor({ reduce, toast, onVisit, onLeave, openBook }) {
+  constructor({ reduce, toast, onVisit, onLeave, openBook, joinRead }) {
     this.openBook = openBook;
+    this.joinRead = joinRead;
     this.homeTab = 'mural';
     this.reduce = reduce;
     this.toast = toast;
@@ -55,6 +57,7 @@ export class Readers {
     this.root.querySelectorAll('[data-close-readers]').forEach((b) => b.addEventListener('click', () => this.close()));
     this.body.addEventListener('submit', (e) => { e.preventDefault(); this.onSubmit(e.target); });
     this.body.addEventListener('click', (e) => this.onClick(e));
+    social.bind(this.body, (t) => this.toast(t));
     this.body.addEventListener('change', (e) => {
       if (!e.target.matches('[data-share]')) return;
       store.setSettings({ shareReading: e.target.checked });
@@ -73,6 +76,8 @@ export class Readers {
         if (event === 'signed-in' && cloud.isRecovering()) this.open();
         if (event === 'signed-out' && store.isReadOnly()) this.leave();
       }
+      if (event === 'choose-start') { this.open(); }
+      if (event === 'started' && !this.root.hidden) this.render();
       if (event === 'sync' && !this.root.hidden) this.renderSync();
       if ((event === 'sync' && cloud.syncStatus().state === 'saved') || event === 'profile') this.tryPendingVisit();
     });
@@ -121,10 +126,12 @@ export class Readers {
     if (u && cloud.isRecovering()) this.body.innerHTML = this.recoverHtml();
     else if (!u) this.body.innerHTML = this.authHtml();
     else if (!p) this.body.innerHTML = this.setupHtml(u);
+    else if (cloud.needsStartChoice()) this.body.innerHTML = this.startHtml(p);
     else {
       this.body.innerHTML = this.homeHtml(p);
       this.loadPeople();
       this.loadMural();
+      if (p.is_admin) this.loadInvite();
     }
   }
 
@@ -156,9 +163,9 @@ export class Readers {
         <label class="field"><span class="field-label">@usuário</span><span class="at-input"><span aria-hidden="true">@</span><input name="username" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ana_lima" required></span><span class="hint-line">Letras minúsculas, números e _. É o endereço da sua estante.</span></label>
         <label class="field"><span class="field-label">E-mail</span><input name="email" type="email" autocomplete="email" required></label>
         <label class="field"><span class="field-label">Senha</span><input name="password" type="password" autocomplete="new-password" minlength="8" required><span class="hint-line">Pelo menos 8 caracteres.</span></label>
+        <label class="field"><span class="field-label">Código de convite</span><input name="invite" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(this.inviteFromUrl || '')}" placeholder="casa-xxxxxx"><span class="hint-line">Quem te chamou para a Estante passa o código.</span></label>
         <p class="form-error" role="alert"></p>
         <button type="submit" class="btn btn-solid btn-wide">Criar minha conta</button>
-        <p class="small">Os livros que já estão neste navegador vão para a sua conta.</p>
       </form>`;
     } else {
       form = `<form class="rd-form" data-form="signin" novalidate>
@@ -176,7 +183,8 @@ export class Readers {
         <ul class="rd-points">
           <li>Sua estante fica salva na conta e aparece em qualquer aparelho.</li>
           <li>Amigos com conta podem visitar o seu acervo, só para ver.</li>
-          <li>Seus links, o arquivo do Drive e o status de leitura ficam só com você.</li>
+          <li>Mural com o que cada um está lendo, resenhas, curtidas e comentários.</li>
+          <li>Entrada só com o código de convite da casa.</li>
         </ul>
       </div>
       <div class="rd-col">${pending}${this.mode === 'reset' ? '' : tabs}${form}</div>
@@ -202,11 +210,43 @@ export class Readers {
       <form class="rd-form" data-form="profile" novalidate>
         <label class="field"><span class="field-label">Seu nome</span><input name="display_name" maxlength="40" value="${esc(m.display_name || '')}" required></label>
         <label class="field"><span class="field-label">@usuário</span><span class="at-input"><span aria-hidden="true">@</span><input name="username" maxlength="20" autocapitalize="none" spellcheck="false" value="${esc(m.username || '')}" required></span><span class="hint-line">Letras minúsculas, números e _.</span></label>
+        <label class="field"><span class="field-label">Código de convite</span><input name="invite" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(m.invite || this.inviteFromUrl || '')}"><span class="hint-line">Peça o código a quem te chamou para a Estante.</span></label>
         <p class="form-error" role="alert"></p>
         <button type="submit" class="btn btn-solid btn-wide">Abrir minha ficha</button>
       </form>
       <button type="button" class="link-btn" data-act="signout">Sair da conta</button>
     </div>`;
+  }
+
+  startHtml(p) {
+    const info = cloud.startChoiceInfo() || {};
+    const opt = (kind, title, text, extra = '') => `<button type="button" class="start-opt" data-start="${kind}">
+        <span class="start-title serif">${title}</span><span class="start-text">${text}</span>${extra}</button>`;
+    return `<div class="rd-col start">
+      <p class="rd-kicker">Ficha aberta · bem-vindo, ${esc(p.display_name.split(' ')[0])}</p>
+      <h3 class="serif">Como começa a sua estante?</h3>
+      <div class="start-grid">
+        ${opt('empty', 'Estante vazia', 'As seções prontas e nenhum livro. Você cataloga só o que é seu.')}
+        ${opt('seed', 'Com sugestões', '87 clássicos e contemporâneos para começar. Dá para remover os que não quiser.')}
+        ${info.localCount ? opt('local', 'Os livros deste navegador', `Os ${info.localCount} livros que já estão aqui, com seus links e anotações.`) : ''}
+      </div>
+    </div>`;
+  }
+
+  goalHtml() {
+    const st = store.readingStats();
+    const pct = st.goal ? Math.min(100, Math.round((st.read / st.goal) * 100)) : 0;
+    const month = new Date().toLocaleDateString('pt-BR', { month: 'long' });
+    return `<section class="goal" aria-labelledby="goal-h">
+      <h3 class="rd-h" id="goal-h">Meta de ${st.year}</h3>
+      <form class="goal-form" data-form="goal" novalidate>
+        <label class="goal-field">Ler <input name="books" type="number" inputmode="numeric" min="1" max="999" value="${st.goal || ''}" placeholder="12"> livros este ano</label>
+        <button type="submit" class="btn btn-sm">${st.goal ? 'Atualizar' : 'Definir meta'}</button>
+      </form>
+      ${st.goal ? `<div class="goal-bar" role="img" aria-label="${st.read} de ${st.goal} livros"><span style="width:${pct}%"></span></div>` : ''}
+      <p class="goal-line"><strong>${st.read}</strong> ${st.read === 1 ? 'livro lido' : 'livros lidos'} em ${st.year}${st.goal ? ` de ${st.goal} (${pct}%)` : ''} · <strong>${nf.format(st.pagesMonth)}</strong> páginas em ${month} · ${nf.format(st.pagesYear)} no ano</p>
+      <p class="hint-line">Contam os livros marcados como Lido a partir de agora e as páginas que você avança no marcador.</p>
+    </section>`;
   }
 
   homeHtml(p) {
@@ -226,6 +266,14 @@ export class Readers {
           <button type="button" class="link-btn" data-act="signout">Sair</button>
         </div>
       </article>
+      ${store.isReadOnly() ? '' : this.goalHtml()}
+      ${p.is_admin ? `<section class="invite" data-invite aria-labelledby="inv-h">
+        <h3 class="rd-h" id="inv-h">Convite da casa</h3>
+        <p class="small">Só entra quem tiver este código. Você é o dono da casa, por isso só você vê e troca o código.</p>
+        <div class="invite-row"><code class="invite-code" data-invite-code>…</code>
+          <button type="button" class="btn btn-sm" data-act="copy-invite">Copiar convite</button>
+          <button type="button" class="link-btn" data-act="new-invite">Gerar outro código</button></div>
+      </section>` : ''}
       <div class="seg rd-tabs" role="tablist" aria-label="Registro">
         <button type="button" role="tab" class="seg-btn${this.homeTab === 'mural' ? ' is-on' : ''}" aria-selected="${this.homeTab === 'mural'}" data-home-tab="mural">Mural de leituras</button>
         <button type="button" role="tab" class="seg-btn${this.homeTab === 'people' ? ' is-on' : ''}" aria-selected="${this.homeTab === 'people'}" data-home-tab="people">Leitores da casa</button>
@@ -242,6 +290,7 @@ export class Readers {
     const t = {
       idle: '', loading: 'Trazendo sua estante da conta…', pending: 'Alterações a salvar…', saving: 'Salvando na conta…',
       saved: s.at ? `Estante salva na conta às ${s.at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.` : 'Estante salva na conta.',
+      conflict: 'Sua estante mudou em outro aparelho. Escolha qual versão fica no aviso do topo da página.',
       error: 'Não deu para salvar na conta agora. Seus livros continuam neste navegador e tentamos de novo na próxima mudança.',
     }[s.state];
     el.textContent = t || '';
@@ -277,6 +326,7 @@ export class Readers {
           <span class="rc-name serif">${esc(x.display_name)}</span>
           <span class="rc-user">@${esc(x.username)}</span>
           <span class="rc-meta">${sum ? `${sum.count} ${sum.count === 1 ? 'volume' : 'volumes'} · ${sum.sections} ${sum.sections === 1 ? 'seção' : 'seções'} · atualizada ${fmtDate(x.shelf.updated_at)}` : 'Estante ainda vazia'}</span>
+          ${sum && sum.stats ? `<span class="rc-meta">${sum.stats.read} ${sum.stats.read === 1 ? 'lido' : 'lidos'} em ${sum.stats.year}${sum.stats.goal ? ` de ${sum.stats.goal}` : ''} · ${nf.format(sum.stats.pagesMonth)} págs. no mês</span>` : ''}
         </span>
         <span class="rc-covers" aria-hidden="true">${covers.map((c) => `<img src="${esc(c)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join('')}</span>
         <span class="rc-go">Visitar</span>
@@ -318,14 +368,75 @@ export class Readers {
         ${r.kind !== 'link' && r.rating ? stars(r.rating) : ''}
         ${r.text ? `<p class="rv-text">${esc(r.text)}</p>` : ''}
         ${r.url ? `<a class="ext rv-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.source || r.url)}</a>` : ''}
+        ${social.socialHtml(r.who.id, r.id)}
       </div>
     </li>`).join('');
+    const reads = await cloud.loadHouseReads().catch(() => null);
+    if (!box.isConnected) return;
+    this.houseReads = reads || [];
+    const club = (reads || []).map((h) => {
+      const bk = h.book || {};
+      const readingNow = feed.reading.filter((r) => r.key === bk.key);
+      const finished = feed.done.get(bk.key) || [];
+      const mineOnShelf = store.isReadOnly() ? null : store.getState().books.find((b) => cloud.bookKey(b) === bk.key);
+      const amIn = readingNow.some((r) => r.who.id === me.id) || finished.some((p) => p.id === me.id);
+      const by = feed.people.find((p) => p.id === h.created_by);
+      const canClose = h.created_by === me.id || me.is_admin;
+      const people = [
+        ...readingNow.map((r) => `<li><span class="mono sm" aria-hidden="true">${esc(initial(r.who.display_name))}</span>${esc(name(r.who))}<span class="club-p">${r.total ? `${Math.min(100, Math.round((r.page / r.total) * 100))}%` : r.page ? `pág. ${r.page}` : 'começou'}</span>${r.total ? `<span class="bm-bar"><span style="width:${Math.min(100, Math.round((r.page / r.total) * 100))}%"></span></span>` : ''}</li>`),
+        ...finished.map((p) => `<li><span class="mono sm" aria-hidden="true">${esc(initial(p.display_name))}</span>${esc(name(p))}<span class="club-p is-done">terminou</span></li>`),
+      ].join('');
+      return `<article class="club">
+        ${thumb(bk)}
+        <div class="club-body">
+          <p class="rd-kicker">Leitura da casa${h.ends_on ? ` · até ${new Date(h.ends_on + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' })}` : ''}</p>
+          <h4 class="serif">${esc(bk.title)}</h4>
+          <p class="mu-meta">${esc((bk.authors || []).join(', '))}${by ? ` · proposta por ${esc(name(by))}` : ''}</p>
+          ${h.note ? `<p class="club-note">“${esc(h.note)}”</p>` : ''}
+          ${people ? `<ul class="club-people">${people}</ul>` : '<p class="mu-meta">Ninguém começou ainda.</p>'}
+          <div class="row">
+            ${amIn ? (mineOnShelf ? `<button type="button" class="btn btn-sm" data-club-open="${esc(mineOnShelf.id)}">Abrir na minha estante</button>` : '') : `<button type="button" class="btn btn-solid btn-sm" data-club-join="${esc(h.id)}">${mineOnShelf ? 'Começar a ler' : 'Participar e pôr na estante'}</button>`}
+            ${canClose ? `<button type="button" class="link-btn" data-club-close="${esc(h.id)}">Encerrar</button>` : ''}
+          </div>
+        </div>
+      </article>`;
+    }).join('');
+    const goals = (feed.stats || []).filter((x) => x.year === new Date().getFullYear() && (x.goal || x.read || x.pagesMonth))
+      .sort((a, b) => b.read - a.read)
+      .map((x) => {
+        const pct = x.goal ? Math.min(100, Math.round((x.read / x.goal) * 100)) : 0;
+        return `<li><span class="mono sm" aria-hidden="true">${esc(initial(x.who.display_name))}</span>
+          <span class="gl-name">${esc(name(x.who))}</span>
+          <span class="gl-bar">${x.goal ? `<span class="goal-bar"><span style="width:${pct}%"></span></span>` : ''}</span>
+          <span class="gl-n">${x.read}${x.goal ? `/${x.goal}` : ''} livros · ${nf.format(x.pagesMonth)} págs. no mês</span></li>`;
+      }).join('');
     box.innerHTML = `
+      <h3 class="rd-h">Leitura da casa</h3>
+      ${club || `<p class="rd-empty-line">${reads === null ? 'O clube do livro precisa da parte 2 da configuração do Supabase.' : 'Nenhuma leitura em grupo agora. Na ficha de um livro da sua estante, use “Propor como leitura da casa”.'}</p>`}
+      ${goals ? `<h3 class="rd-h">Metas de ${new Date().getFullYear()}</h3><ol class="goal-list">${goals}</ol>` : ''}
       <h3 class="rd-h">Lendo agora</h3>
       ${reading ? `<ol class="mu-reading-list">${reading}</ol>` : '<p class="rd-empty-line">Ninguém marcou um livro como “Lendo” ainda. Na ficha do livro, marque Lendo e registre a página.</p>'}
       <h3 class="rd-h">Resenhas publicadas</h3>
       ${reviews ? `<ol class="mu-reviews">${reviews}</ol>` : '<p class="rd-empty-line">Nenhuma resenha publicada ainda. Abra um livro, vá em Resenhas e publique a primeira.</p>'}`;
-    if (!this.reduce) gsap.from(box.querySelectorAll('li'), { opacity: 0, y: 10, duration: 0.4, ease: 'power3.out', stagger: 0.03 });
+    if (!this.reduce) gsap.from(box.querySelectorAll('.mu-reading-list > li, .mu-reviews > li, .club'), { opacity: 0, y: 10, duration: 0.4, ease: 'power3.out', stagger: 0.03 });
+    social.hydrate(box, { fresh: true });
+  }
+
+  async loadInvite() {
+    const el = this.body.querySelector('[data-invite-code]');
+    if (!el) return;
+    try {
+      const code = await cloud.getInvite();
+      el.textContent = code || '—';
+      this.invite = code;
+    } catch (e) {
+      el.textContent = 'rode a parte 2 do SQL';
+    }
+  }
+
+  inviteText() {
+    const url = `${location.origin}${location.pathname}#convite=${encodeURIComponent(this.invite)}`;
+    return `Vem pra minha Estante! Crie sua conta em ${url} (o código de convite ${this.invite} já vai preenchido).`;
   }
 
   async openFromMural(owner, bookId) {
@@ -345,6 +456,15 @@ export class Readers {
   async onSubmit(form) {
     const kind = form.dataset.form;
     if (!kind) return;
+    if (kind === 'goal') {
+      const n = Math.round(+form.elements.books.value);
+      if (!(n > 0 && n < 1000)) { form.elements.books.focus(); return; }
+      store.setSettings({ goal: { year: new Date().getFullYear(), books: n } });
+      const sec = this.body.querySelector('.goal');
+      if (sec) sec.outerHTML = this.goalHtml();
+      this.toast(`Meta de ${n} livros em ${new Date().getFullYear()} salva.`);
+      return;
+    }
     const err = form.querySelector('.form-error');
     const btn = form.querySelector('[type="submit"]');
     const v = (n) => (form.elements[n] ? form.elements[n].value.trim() : '');
@@ -367,7 +487,7 @@ export class Readers {
         await cloud.signIn(v('email'), form.elements.password.value);
         this.toast('Bem-vindo de volta.');
       } else if (kind === 'signup') {
-        const r = await cloud.signUp(v('email'), form.elements.password.value, { username: v('username').toLowerCase(), display_name: v('display_name') });
+        const r = await cloud.signUp(v('email'), form.elements.password.value, { username: v('username').toLowerCase(), display_name: v('display_name'), invite: v('invite') });
         if (r.needsConfirm) { this.mode = 'sent'; this.sentTo = v('email'); this.render(); return; }
         this.toast('Conta criada. Sua estante agora fica salva na conta.');
       } else if (kind === 'reset') {
@@ -379,7 +499,7 @@ export class Readers {
         window.location.reload();
         return;
       } else if (kind === 'profile') {
-        await cloud.saveProfile({ username: v('username').toLowerCase(), display_name: v('display_name') });
+        await cloud.saveProfile({ username: v('username').toLowerCase(), display_name: v('display_name'), code: v('invite') });
         this.toast('Ficha aberta. Sua estante já está na conta.');
         this.render();
         return;
@@ -402,6 +522,29 @@ export class Readers {
       this.homeTab = ht.dataset.homeTab;
       this.body.querySelectorAll('[data-home-tab]').forEach((b) => { const on = b === ht; b.classList.toggle('is-on', on); b.setAttribute('aria-selected', String(on)); });
       this.body.querySelectorAll('[data-home-panel]').forEach((p) => { p.hidden = p.dataset.homePanel !== this.homeTab; });
+      return;
+    }
+    const st = e.target.closest('[data-start]');
+    if (st) { st.disabled = true; cloud.chooseStart(st.dataset.start); this.toast(st.dataset.start === 'empty' ? 'Estante vazia pronta. Catalogue o primeiro livro.' : 'Estante pronta e salva na conta.'); return; }
+    if (act && act.dataset.act === 'copy-invite' && this.invite) {
+      navigator.clipboard.writeText(this.inviteText()).then(() => { act.textContent = 'Convite copiado'; }, () => { act.textContent = 'Não deu para copiar'; });
+      setTimeout(() => { if (act.isConnected) act.textContent = 'Copiar convite'; }, 2500);
+      return;
+    }
+    if (act && act.dataset.act === 'new-invite') {
+      if (act.dataset.armed !== '1') { act.dataset.armed = '1'; act.textContent = 'Confirmar: o código antigo para de funcionar'; return; }
+      const code = 'casa-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), (n) => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('');
+      cloud.setInvite(code).then((c) => { this.invite = c; this.body.querySelector('[data-invite-code]').textContent = c; act.dataset.armed = ''; act.textContent = 'Gerar outro código'; this.toast('Código novo. Quem já entrou continua na casa.'); }, (err) => this.toast(message(err)));
+      return;
+    }
+    const cj = e.target.closest('[data-club-join]');
+    if (cj) { const h = (this.houseReads || []).find((x) => x.id === cj.dataset.clubJoin); if (h) { this.close(); setTimeout(() => this.joinRead(h), this.reduce ? 0 : 320); } return; }
+    const co = e.target.closest('[data-club-open]');
+    if (co) { if (store.isReadOnly()) this.leave(); this.close(); setTimeout(() => this.openBook(co.dataset.clubOpen), this.reduce ? 0 : 320); return; }
+    const cc = e.target.closest('[data-club-close]');
+    if (cc) {
+      if (cc.dataset.armed !== '1') { cc.dataset.armed = '1'; cc.textContent = 'Confirmar encerramento'; return; }
+      cloud.closeHouseRead(cc.dataset.clubClose).then(() => { this.toast('Leitura da casa encerrada.'); this.loadMural({ fresh: true }); }, (err) => this.toast(message(err)));
       return;
     }
     const ob = e.target.closest('[data-open-book]');
@@ -431,6 +574,13 @@ export class Readers {
 
   /* ---------------- visiting ---------------- */
   fromHash() {
+    const inv = location.hash.match(/^#convite=([\w-]{4,40})$/);
+    if (inv) {
+      this.inviteFromUrl = decodeURIComponent(inv[1]);
+      history.replaceState(null, '', location.pathname + location.search);
+      if (!cloud.currentProfile()) { this.mode = 'signup'; setTimeout(() => { if (!cloud.currentProfile()) this.open(); }, 1200); }
+      return;
+    }
     const m = location.hash.match(/^#@([a-z0-9_]{3,20})$/i);
     if (!m) { if (store.isReadOnly()) this.leave({ fromHash: true }); return; }
     const name = m[1].toLowerCase();

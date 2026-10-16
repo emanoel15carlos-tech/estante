@@ -372,8 +372,41 @@ export function addBook(data) {
   return book;
 }
 
+const monthKey = (d = new Date()) => d.toISOString().slice(0, 7);
+
 export function updateBook(id, patch, meta = {}) {
-  commit({ ...state, books: state.books.map((b) => (b.id === id ? { ...b, ...patch } : b)) }, { updated: id, ...meta });
+  const book = state.books.find((b) => b.id === id);
+  if (!book) return;
+  const next = { ...patch };
+  // Remember when a book was finished, for the year's reading goal.
+  if (next.status === 'lido' && book.status !== 'lido') next.finishedAt = new Date().toISOString();
+  if (next.status !== undefined && next.status !== 'lido' && book.finishedAt) next.finishedAt = null;
+  let pageLog = state.pageLog;
+  if (meta.pages > 0) {
+    const k = monthKey();
+    pageLog = { ...(pageLog || {}), [k]: ((pageLog || {})[k] || 0) + meta.pages };
+  }
+  commit({ ...state, pageLog, books: state.books.map((b) => (b.id === id ? { ...b, ...next } : b)) }, { updated: id, ...meta });
+}
+
+/** Reading numbers for the year: books finished, goal, pages this month. */
+export function readingStats(s = state, now = new Date()) {
+  const year = now.getFullYear();
+  const read = s.books.filter((b) => b.status === 'lido' && b.finishedAt && b.finishedAt.slice(0, 4) === String(year)).length;
+  const goal = (s.settings && s.settings.goal && s.settings.goal.year === year && s.settings.goal.books) || 0;
+  const pagesMonth = (s.pageLog || {})[monthKey(now)] || 0;
+  const pagesYear = Object.entries(s.pageLog || {}).filter(([k]) => k.startsWith(String(year))).reduce((a, [, v]) => a + v, 0);
+  return { year, read, goal, pagesMonth, pagesYear };
+}
+
+/** A shelf with the usual sections and no books, for readers who want to start from zero. */
+export function emptyCollection() {
+  return { seedVersion: SEED_VERSION, removedSections: [], sections: DEFAULT_SECTIONS.map((s) => ({ ...s })), books: [] };
+}
+
+/** True when this browser holds only the untouched starting collection. */
+export function isPristine(s = state) {
+  return s.books.every((b) => String(b.id).startsWith('seed-') && !b.status && !(b.links && b.links.length) && !b.drive && !(b.reviews && b.reviews.length) && !b.progress);
 }
 
 export function removeBook(id) {

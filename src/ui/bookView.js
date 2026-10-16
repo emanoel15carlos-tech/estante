@@ -3,6 +3,7 @@
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
 import * as cloud from '../lib/cloud.js';
+import * as social from './social.js';
 import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
 import { esc, hostOf, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
@@ -63,6 +64,7 @@ export class BookView {
     const reader = document.getElementById('reader');
     reader.querySelectorAll('[data-close-reader]').forEach((x) => x.addEventListener('click', () => this.closeReader()));
     this.info.addEventListener('click', (e) => this.onClick(e));
+    social.bind(this.info, (t) => this.flash(t));
     this.info.addEventListener('change', (e) => this.onChange(e));
     this.info.addEventListener('input', (e) => {
       if (!e.target.matches('[data-range]')) return;
@@ -73,6 +75,8 @@ export class BookView {
       if (pct) pct.textContent = Math.round((v / +e.target.max) * 100) + '%';
     });
     this.info.addEventListener('submit', (e) => {
+      const pp = e.target.closest('[data-propose-form]');
+      if (pp) { e.preventDefault(); this.onPropose(pp); return; }
       const rv = e.target.closest('[data-review-form]');
       if (rv) { e.preventDefault(); this.onReviewSubmit(rv); return; }
       const drive = e.target.closest('[data-drive-form]');
@@ -153,6 +157,7 @@ export class BookView {
           ${STATUS.map(([id, label]) => `<button type="button" class="pill${b.status === id ? ' is-on' : ''}" data-status="${id}" aria-pressed="${b.status === id}">${label}</button>`).join('')}
         </div>
         <div class="bookmark-slot">${this.progressHtml(b)}</div>
+        <div class="club-slot">${this.clubHtml(b)}</div>
         <div class="meta-row">
           <label class="field"><span class="field-label">Seção</span>
             <select data-act="section">${sections.map((s) => `<option value="${esc(s.id)}"${s.id === b.sectionId ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
@@ -222,7 +227,7 @@ export class BookView {
     const patch = { progress: next };
     const done = next.total && next.page >= next.total && b.status === 'lendo';
     if (done) patch.status = 'lido';
-    store.updateBook(b.id, patch);
+    store.updateBook(b.id, patch, { pages: Math.max(0, next.page - (pr.page || 0)) });
     if (done) {
       this.setStatusUi('lido');
       this.note('Fim do livro. Marcamos como lido.');
@@ -267,6 +272,7 @@ export class BookView {
       </div>
       ${r.text ? `<p class="rv-text">${esc(r.text)}</p>` : ''}
       ${r.url ? `<a class="ext rv-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.source || hostOf(r.url))}${ICON_OUT}</a>` : ''}
+      ${r.public || who ? social.socialHtml(who ? who.id : (store.visiting() ? store.visiting().id : cloud.currentUser() && cloud.currentUser().id), r.id) : ''}
       ${own ? `<div class="rv-actions"><button type="button" class="link-btn" data-review-toggle="${esc(r.id)}">${r.public ? 'Deixar só para mim' : 'Publicar para os leitores'}</button><button type="button" class="link-btn" data-review-remove="${esc(r.id)}">Apagar</button></div>` : ''}
     </li>`;
   }
@@ -295,7 +301,60 @@ export class BookView {
     const p = this.panel('resenhas');
     if (!p || !this.book) return;
     p.innerHTML = this.reviewsHtml(this.book);
+    social.hydrate(p);
     this.loadHouseReviews(this.book, { cached: true });
+  }
+
+  /* ---------------- leitura da casa ---------------- */
+
+  clubHtml(b) {
+    if (store.isReadOnly() || !cloud.currentProfile()) return '';
+    return '<button type="button" class="link-btn club-propose" data-act="propose">Propor como leitura da casa</button>';
+  }
+
+  renderClub() {
+    const slot = this.info.querySelector('.club-slot');
+    if (slot && this.book) slot.innerHTML = this.clubHtml(this.book);
+  }
+
+  showPropose() {
+    const slot = this.info.querySelector('.club-slot');
+    if (!slot) return;
+    const d = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+    slot.innerHTML = `<form class="propose" data-propose-form novalidate>
+      <h3 class="bv-h">Leitura da casa</h3>
+      <p class="small">Todos os leitores veem a proposta no Mural e podem entrar na leitura.</p>
+      <label class="field"><span class="field-label">Ler até</span><input type="date" name="ends_on" value="${d}" min="${new Date().toISOString().slice(0, 10)}"></label>
+      <label class="field"><span class="field-label">Recado para a casa <span class="opt">(opcional)</span></span><textarea name="note" rows="2" maxlength="500" placeholder="Por que vale ler juntos?"></textarea></label>
+      <p class="form-error" role="alert"></p>
+      <div class="row"><button type="submit" class="btn btn-solid">Propor leitura</button><button type="button" class="link-btn" data-act="propose-cancel">Cancelar</button></div>
+    </form>`;
+    slot.querySelector('input').focus();
+  }
+
+  async onPropose(form) {
+    const btn = form.querySelector('[type="submit"]');
+    btn.disabled = true;
+    try {
+      await cloud.proposeHouseRead(this.book, { note: form.elements.note.value.trim(), ends_on: form.elements.ends_on.value || null });
+      const b = this.book;
+      if (b.status !== 'lendo' && b.status !== 'lido') { store.updateBook(b.id, { status: 'lendo' }); this.setStatusUi('lendo'); }
+      this.renderClub();
+      this.flash(`“${b.title}” agora é leitura da casa. Está no Mural.`);
+    } catch (e) {
+      btn.disabled = false;
+      form.querySelector('.form-error').textContent = /house_reads/.test(e.message || '') ? 'O clube do livro precisa da parte 2 da configuração do Supabase.' : 'Não deu para propor agora. Tente de novo.';
+    }
+  }
+
+  flash(text) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = text;
+    gsap.killTweensOf(t);
+    gsap.to(t, { yPercent: 0, opacity: 1, duration: this.reduce ? 0 : 0.45, ease: 'expo.out' });
+    clearTimeout(this.flashT);
+    this.flashT = setTimeout(() => gsap.to(t, { opacity: 0, yPercent: 160, duration: this.reduce ? 0 : 0.3 }), 3200);
   }
 
   onReviewSubmit(form) {
@@ -335,6 +394,7 @@ export class BookView {
     const readingNow = feed.reading.filter((r) => r.key === key && r.who.id !== me.id);
     slot.innerHTML = (readingNow.length ? `<p class="bv-text house-reading">${readingNow.map((r) => `<strong>${esc(r.who.display_name)}</strong>${r.page ? ` está na página ${nf.format(r.page)}${r.total ? ` de ${nf.format(r.total)}` : ''}` : ' está lendo'}`).join(' · ')}.</p>` : '')
       + (others.length ? `<h3 class="bv-h">Dos leitores da casa</h3><ul class="reviews">${others.map((r) => this.reviewCard(r, r.who)).join('')}</ul>` : '');
+    social.hydrate(this.panel('resenhas'));
   }
 
   setStatusUi(next) {
@@ -394,8 +454,18 @@ export class BookView {
   }
 
   driveHtml(b) {
-    if (store.isReadOnly()) return '';
     const d = b.drive;
+    if (store.isReadOnly()) {
+      if (!d) return '';
+      return `<section class="drive-box has-file" aria-labelledby="dr-h">
+        <h3 class="bv-h" id="dr-h">Arquivo compartilhado por ${esc(store.visiting().display_name)}</h3>
+        <div class="drive-card"><span class="drive-icon">${DRIVE_ICON}</span><div class="drive-meta"><strong>${esc(d.name || d.label)}</strong><span>${esc(d.label)}</span></div></div>
+        <div class="row">
+          <button type="button" class="btn btn-solid" data-act="read-file">Ler aqui</button>
+          <a class="btn" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
+        </div>
+      </section>`;
+    }
     if (d) {
       return `<section class="drive-box has-file" aria-labelledby="dr-h">
         <h3 class="bv-h" id="dr-h">Meu arquivo no Drive</h3>
@@ -408,6 +478,7 @@ export class BookView {
           <a class="btn" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
           <button type="button" class="link-btn" data-act="drive-remove">Desanexar</button>
         </div>
+        <label class="check"><input type="checkbox" data-drive-share ${b.driveShared ? 'checked' : ''}><span>Deixar os leitores da casa abrirem este arquivo</span></label>
         <p class="bv-note">Para abrir aqui no site, o arquivo precisa estar compartilhado no Drive como “Qualquer pessoa com o link”. Se for privado, use “Abrir no Drive”.</p>
       </section>`;
     }
@@ -692,10 +763,17 @@ export class BookView {
     else if (act === 'remove') this.remove(el);
     else if (act === 'read-file') this.openReader();
     else if (act === 'start-reading') { store.updateBook(this.id, { status: 'lendo' }); this.setStatusUi('lendo'); const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
-    else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null }, { drive: true }); this.refreshDrive(); }
+    else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null, driveShared: false }, { drive: true }); this.refreshDrive(); }
+    else if (act === 'propose') this.showPropose();
+    else if (act === 'propose-cancel') this.renderClub();
   }
 
   onChange(e) {
+    if (e.target.matches('[data-drive-share]')) {
+      store.updateBook(this.id, { driveShared: e.target.checked });
+      this.flash(e.target.checked ? 'Os leitores da casa podem abrir este arquivo.' : 'O arquivo voltou a ser só seu.');
+      return;
+    }
     if (e.target.matches('[data-page], [data-range]')) { this.saveProgress({ page: +e.target.value }); return; }
     if (e.target.matches('[data-total]')) { this.saveProgress({ total: +e.target.value }); return; }
     if (e.target.dataset.act === 'section' && this.id) {

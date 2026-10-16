@@ -12,6 +12,7 @@ import { AddBook } from './ui/addBook.js';
 import { SectionsPanel } from './ui/sections.js';
 import { Readers } from './ui/readers.js';
 import * as cloud from './lib/cloud.js';
+import { suggestSection } from './lib/categories.js';
 
 gsap.registerPlugin(ScrollTrigger, Flip);
 
@@ -124,6 +125,14 @@ function renderShelves({ flip = true } = {}) {
   const { sections } = store.getState();
   const books = visibleBooks();
   const shown = sections.filter((s) => ui.cat === 'todas' || s.id === ui.cat);
+  if (!store.getState().books.length) {
+    $shelves.innerHTML = `<div class="empty empty-case">
+      <p class="serif">Uma estante nova, esperando o primeiro livro.</p>
+      <p class="small">As ${sections.length} seções já estão prontas. Busque pelo título, autor ou ISBN, ou cadastre à mão.</p>
+      ${store.isReadOnly() ? '' : '<button type="button" class="btn btn-brass" data-add-from-empty>Catalogar o primeiro livro</button>'}
+    </div>`;
+    return;
+  }
   const html = shown.map((s) => {
     const bs = books.filter((b) => b.sectionId === s.id);
     if (!bs.length && (ui.q || ui.status !== 'todos')) return '';
@@ -261,6 +270,23 @@ const readers = new Readers({
   reduce,
   toast,
   onVisit: (p) => setVisiting(p),
+  joinRead: (h) => {
+    if (store.isReadOnly()) readers.leave();
+    const bk = h.book || {};
+    let b = store.getState().books.find((x) => cloud.bookKey(x) === bk.key);
+    if (!b) {
+      const sections = store.getState().sections;
+      const sec = suggestSection({ title: bk.title, categories: [] }, sections);
+      b = store.addBook({
+        title: bk.title, authors: bk.authors, year: bk.year, synopsis: bk.synopsis, isbn: bk.isbn, pageCount: bk.pageCount,
+        cover: bk.cover, coverSource: 'openlibrary', source: 'manual', sectionId: sec || (sections[0] && sections[0].id), status: 'lendo',
+      });
+    } else if (b.status !== 'lendo') {
+      store.updateBook(b.id, { status: 'lendo' });
+    }
+    toast(`Você entrou na leitura de “${bk.title}”. Marque a página na ficha.`);
+    readers.openBook(b.id);
+  },
   openBook: (id) => {
     const slot = $shelves.querySelector(`.slot[data-book="${CSS.escape(id)}"] .spine`);
     if (!store.getState().books.some((b) => b.id === id)) { toast('Esse livro não está mais na estante.'); return; }
@@ -275,6 +301,19 @@ const readers = new Readers({
   onLeave: () => { setVisiting(null); renderTabs(); renderShelves({ flip: false }); toast('De volta à sua estante.'); },
 });
 cloud.boot();
+
+const $syncBar = document.getElementById('sync-bar');
+cloud.onChange(({ event }) => {
+  if (event === 'conflict') { $syncBar.hidden = false; if (!reduce) gsap.from($syncBar, { y: -16, opacity: 0, duration: 0.45, ease: 'expo.out' }); }
+  if (event === 'pulled') { $syncBar.hidden = true; toast('Estante atualizada com a versão da conta.'); }
+  if (event === 'signed-out') $syncBar.hidden = true;
+});
+document.getElementById('sync-pull').addEventListener('click', () => cloud.pullNow());
+document.getElementById('sync-keep').addEventListener('click', async () => {
+  $syncBar.hidden = true;
+  await cloud.pushNow(true, { override: true });
+  toast('A versão deste aparelho foi salva na conta.');
+});
 
 const sectionsPanel = new SectionsPanel({ reduce, onChanged: (msg) => { if (msg) toast(msg); } });
 document.getElementById('open-sections').addEventListener('click', () => sectionsPanel.open());
