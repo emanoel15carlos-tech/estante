@@ -713,13 +713,15 @@ button.reader-card:hover .rc-go, button.reader-card:focus-visible .rc-go { opaci
 /* ---------- Reviews ---------- */
 .review-form { display: grid; gap: 12px; padding: 14px 16px; border: 1px dashed var(--line); border-radius: 3px; margin-bottom: 18px; }
 .seg-sm .seg-btn { min-height: 36px; font-size: 13px; }
-.rate { display: flex; gap: 2px; border: 0; padding: 0; margin: 0; flex-direction: row-reverse; justify-content: flex-end; }
-.rate legend { float: left; width: 100%; margin-bottom: 4px; font-size: 13px; color: var(--ink-3); }
+.rate { display: flex; flex-wrap: wrap; gap: 2px; border: 0; padding: 0; margin: 0; }
+.rate legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--ink-3); }
 .rate label { cursor: pointer; display: inline-grid; place-items: center; width: 36px; height: 36px; }
 .rate input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .rate svg { width: 26px; height: 26px; fill: transparent; stroke: var(--ink-3); stroke-width: 1.3; transition: fill .15s, transform .15s; }
-.rate label:hover svg, .rate label:hover ~ label svg, .rate input:checked + .sr + svg, .rate label:has(input:checked) ~ label svg { fill: #c58a1c; stroke: #8a5e12; }
-.rate label:has(input:checked) svg { fill: #c58a1c; stroke: #8a5e12; }
+.rate label:has(input:checked) svg, .rate label:has(~ label input:checked) svg { fill: #c58a1c; stroke: #8a5e12; }
+.rate:hover label svg { fill: transparent; stroke: var(--ink-3); }
+.rate:hover label:hover svg, .rate:hover label:has(~ label:hover) svg { fill: #c58a1c; stroke: #8a5e12; }
+.check input:disabled { opacity: .45; }
 .rate input:focus-visible + .sr + svg { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--ink-2); cursor: pointer; }
 .check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--card-red); flex: none; }
@@ -761,3 +763,6 @@ button.reader-card:hover .rc-go, button.reader-card:focus-visible .rc-go { opaci
 .mu-line .mono.sm { margin-right: 8px; }
 .mu-link { padding: 0; border: 0; background: none; font-size: 17px; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
 .mu-link:hover { text-decoration-color: var(--card-red); }
+
+/* six tabs on the catalog card: wrap instead of hiding the last ones */
+.bv-tabs { flex-wrap: wrap; overflow: visible; }
