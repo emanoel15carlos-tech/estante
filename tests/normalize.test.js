@@ -99,20 +99,32 @@ test('parseDrive recognises Drive and Docs links', () => {
   assert.equal(parseDrive('javascript:alert(1)'), null);
 });
 
-test('cloud split keeps links, Drive file and status private', async () => {
-  const { splitState, joinState } = await import('../src/lib/cloud.js');
+test('cloud split: links and Drive always private, reading shared unless turned off, reviews by choice', async () => {
+  const { splitState, joinState, bookKey } = await import('../src/lib/cloud.js');
   const state = { seedVersion: 3, removedSections: [], sections: [{ id: 'fi', name: 'Ficção' }], books: [
-    { id: 'a', title: 'A', status: 'lido', links: [{ id: 'l', url: 'https://x.org' }], drive: { id: 'D' }, cover: 'https://c/a.jpg' },
+    { id: 'a', title: 'Dom Casmurro', authors: ['Machado de Assis'], status: 'lendo', progress: { page: 50, total: 200 },
+      links: [{ id: 'l', url: 'https://x.org' }], drive: { id: 'D' }, cover: 'https://c/a.jpg',
+      reviews: [{ id: 'r1', text: 'público', public: true, at: '2026-10-02' }, { id: 'r2', text: 'segredo', public: false, at: '2026-10-01' }] },
     { id: 'b', title: 'B', links: [] },
   ] };
   const { pub, priv } = splitState(state);
-  assert.equal(JSON.stringify(pub).includes('x.org'), false);
-  assert.equal(JSON.stringify(pub).includes('lido'), false);
-  assert.deepEqual(Object.keys(priv.books), ['a']);
+  const p = JSON.stringify(pub);
+  assert.equal(p.includes('x.org'), false);
+  assert.equal(p.includes('segredo'), false);
+  assert.equal(p.includes('público'), true);
+  assert.equal(pub.books[0].status, 'lendo');
+  assert.equal(pub.reading[0].page, 50);
+  assert.equal(pub.reviews[0].key, bookKey(state.books[0]));
   assert.equal(pub.summary.count, 2);
   const back = joinState(pub, priv);
-  assert.equal(back.books[0].status, 'lido');
   assert.equal(back.books[0].drive.id, 'D');
+  assert.deepEqual(back.books[0].reviews.map((r) => r.id), ['r1', 'r2']);
   assert.equal(back.summary, undefined);
-  assert.equal(joinState(pub, null).books[0].status, undefined);
+
+  const hidden = splitState({ ...state, settings: { shareReading: false } });
+  assert.equal(hidden.pub.books[0].status, undefined);
+  assert.equal(hidden.pub.reading.length, 0);
+  assert.equal(joinState(hidden.pub, hidden.priv).books[0].progress.page, 50);
+  assert.equal(joinState(hidden.pub, hidden.priv).settings.shareReading, false);
+  assert.equal(bookKey({ title: 'Dom  Casmurro!', authors: ['Machado de ASSIS'] }), bookKey(state.books[0]));
 });

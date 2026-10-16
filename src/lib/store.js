@@ -425,6 +425,11 @@ export function callNumber(book, section) {
   return { code: (section && section.code) || '', cutter };
 }
 
+export const settings = () => ({ shareReading: true, ...(state.settings || {}) });
+export function setSettings(patch) {
+  commit({ ...state, settings: { ...settings(), ...patch } }, { settings: true });
+}
+
 export function resetCollection() {
   commit(seed(), { reset: true });
 }

@@ -2,6 +2,7 @@
 // cover, opened on demand, and flown back to its slot when closed.
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
+import * as cloud from '../lib/cloud.js';
 import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
 import { esc, hostOf, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
@@ -15,12 +16,25 @@ const STATUS_TEXT = { quero: 'Na fila de leitura', lendo: 'Leitura em andamento'
 
 const TABS = [
   ['sobre', 'Sobre'],
+  ['resenhas', 'Resenhas'],
   ['ler', 'Ler e baixar'],
   ['leitores', 'Leitores'],
   ['temas', 'Temas'],
   ['parecidos', 'Parecidos'],
 ];
 const nf = new Intl.NumberFormat('pt-BR');
+const STAR = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.8l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.7l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg>';
+const stars = (n) => `<span class="stars" aria-label="${n} de 5 estrelas">${[1, 2, 3, 4, 5].map((i) => `<span class="${i <= n ? 'on' : ''}">${STAR}</span>`).join('')}</span>`;
+export const when = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d) / 864e5);
+  if (days < 1) return 'hoje';
+  if (days === 1) return 'ontem';
+  if (days < 30) return `há ${days} dias`;
+  return d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+export { stars };
 const ICON_OUT = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M5 2h7v7M12 2L5.5 8.5M10 9.5V12H2V4h2.5" stroke="currentColor" stroke-width="1.4"/></svg>';
 const DRIVE_ICON = '<svg width="22" height="20" viewBox="0 0 22 20" fill="none" aria-hidden="true"><path d="M7.5 1h7l7 12-3.5 6h-14L.5 13l7-12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.5 1l7 12M14.5 1l-7 12M.5 13h21" stroke="currentColor" stroke-width="1.4"/></svg>';
 const ext = (url, label) => `<a class="ext" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}${ICON_OUT}</a>`;
@@ -50,7 +64,17 @@ export class BookView {
     reader.querySelectorAll('[data-close-reader]').forEach((x) => x.addEventListener('click', () => this.closeReader()));
     this.info.addEventListener('click', (e) => this.onClick(e));
     this.info.addEventListener('change', (e) => this.onChange(e));
+    this.info.addEventListener('input', (e) => {
+      if (!e.target.matches('[data-range]')) return;
+      const v = +e.target.value;
+      const n = this.info.querySelector('[data-page]');
+      if (n) n.value = v;
+      const pct = this.info.querySelector('[data-pct]');
+      if (pct) pct.textContent = Math.round((v / +e.target.max) * 100) + '%';
+    });
     this.info.addEventListener('submit', (e) => {
+      const rv = e.target.closest('[data-review-form]');
+      if (rv) { e.preventDefault(); this.onReviewSubmit(rv); return; }
       const drive = e.target.closest('[data-drive-form]');
       if (drive) { e.preventDefault(); this.onDriveSubmit(drive); return; }
       const form = e.target.closest('[data-link-form]');
@@ -128,6 +152,7 @@ export class BookView {
         <div class="pills" role="group" aria-label="Status de leitura">
           ${STATUS.map(([id, label]) => `<button type="button" class="pill${b.status === id ? ' is-on' : ''}" data-status="${id}" aria-pressed="${b.status === id}">${label}</button>`).join('')}
         </div>
+        <div class="bookmark-slot">${this.progressHtml(b)}</div>
         <div class="meta-row">
           <label class="field"><span class="field-label">Seção</span>
             <select data-act="section">${sections.map((s) => `<option value="${esc(s.id)}"${s.id === b.sectionId ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
@@ -136,7 +161,7 @@ export class BookView {
         </div>
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
       </div>
-      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
+      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
         <button type="button" class="btn btn-solid" data-act="cover">${this.coverOpen ? 'Fechar livro' : 'Abrir livro'}</button>
         ${b.drive ? '<button type="button" class="btn btn-drive" data-act="read-file">' + DRIVE_ICON + 'Ler o arquivo</button>' : ''}
@@ -144,6 +169,189 @@ export class BookView {
         <button type="button" class="btn" data-act="next" aria-label="Próximo livro">Próximo<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>`;
     this.loadInsights(b);
+    this.loadHouseReviews(b);
+  }
+
+  /* ---------------- bookmark: the page you are on ---------------- */
+
+  progressHtml(b) {
+    const ro = store.isReadOnly();
+    const pr = b.progress || {};
+    const total = pr.total || b.pageCount || (this.insights && this.insights.pages) || 0;
+    const page = Math.min(pr.page || 0, total || Infinity);
+    const pct = total ? Math.round((page / total) * 100) : 0;
+    if (ro) {
+      if (b.status !== 'lendo' || !page) return '';
+      return `<div class="bookmark is-ro"><p class="bm-line">Na página <strong>${nf.format(page)}</strong>${total ? ` de ${nf.format(total)} · ${pct}%` : ''}</p>
+        ${total ? `<div class="bm-bar" aria-hidden="true"><span style="width:${pct}%"></span></div>` : ''}</div>`;
+    }
+    if (b.status !== 'lendo') {
+      return b.status === 'lido' ? '' : '<button type="button" class="link-btn bm-start" data-act="start-reading">Comecei a ler: marcar a página</button>';
+    }
+    return `<div class="bookmark" role="group" aria-labelledby="bm-h">
+      <span class="bm-ribbon" aria-hidden="true"></span>
+      <h3 class="bv-h" id="bm-h">Marcador</h3>
+      <div class="bm-row">
+        <label class="bm-field"><span>Estou na página</span>
+          <span class="stepper">
+            <button type="button" class="icon-btn sm" data-step="-1" aria-label="Voltar uma página">−</button>
+            <input type="number" inputmode="numeric" min="0" ${total ? `max="${total}"` : ''} value="${page || ''}" placeholder="0" data-page aria-label="Página atual">
+            <button type="button" class="icon-btn sm" data-step="1" aria-label="Avançar uma página">+</button>
+          </span>
+        </label>
+        <label class="bm-field"><span>de</span><input type="number" inputmode="numeric" min="1" value="${total || ''}" placeholder="total" data-total aria-label="Total de páginas"></label>
+      </div>
+      ${total ? `<input type="range" class="bm-range" min="0" max="${total}" value="${page}" data-range aria-label="Arraste até a página em que você está">
+      <p class="bm-line"><strong data-pct>${pct}%</strong> lido${pr.at ? ` · marcado ${when(pr.at)}` : ''}${total - page > 0 ? ` · faltam ${nf.format(total - page)} páginas` : ''}</p>` : '<p class="bm-line">Informe o total de páginas para ver quanto falta.</p>'}
+    </div>`;
+  }
+
+  renderProgress() {
+    const slot = this.info.querySelector('.bookmark-slot');
+    if (slot && this.book) slot.innerHTML = this.progressHtml(this.book);
+  }
+
+  saveProgress({ page, total }) {
+    const b = this.book;
+    const pr = b.progress || {};
+    const next = { page: pr.page || 0, total: pr.total || b.pageCount || (this.insights && this.insights.pages) || 0 };
+    if (total !== undefined) next.total = Math.max(0, Math.round(total) || 0);
+    if (page !== undefined) next.page = Math.max(0, Math.round(page) || 0);
+    if (next.total && next.page > next.total) next.page = next.total;
+    next.at = new Date().toISOString();
+    const patch = { progress: next };
+    const done = next.total && next.page >= next.total && b.status === 'lendo';
+    if (done) patch.status = 'lido';
+    store.updateBook(b.id, patch);
+    if (done) {
+      this.setStatusUi('lido');
+      this.note('Fim do livro. Marcamos como lido.');
+    } else {
+      this.renderProgress();
+    }
+  }
+
+  note(text) {
+    const slot = this.info.querySelector('.bookmark-slot');
+    if (!slot) return;
+    slot.insertAdjacentHTML('beforeend', `<p class="bm-done" role="status">${esc(text)}</p>`);
+  }
+
+  /* ---------------- reviews ---------------- */
+
+  reviewsHtml(b) {
+    const ro = store.isReadOnly();
+    const mine = b.reviews || [];
+    const owner = store.visiting();
+    const list = (rs, who) => rs.map((r) => this.reviewCard(r, who)).join('');
+    let html = '';
+    if (ro) {
+      html += mine.length ? `<h3 class="bv-h">De ${esc(owner.display_name)}</h3><ul class="reviews">${list(mine, owner)}</ul>` : '';
+    } else {
+      html += this.reviewFormHtml();
+      if (mine.length) html += `<h3 class="bv-h">Suas resenhas</h3><ul class="reviews">${list(mine, null)}</ul>`;
+    }
+    html += '<div class="house-reviews"></div>';
+    return html;
+  }
+
+  reviewCard(r, who) {
+    const own = !who && !store.isReadOnly();
+    const by = who ? `<span class="rv-by">${esc(who.display_name)}</span>` : '';
+    return `<li class="review${r.kind === 'link' ? ' is-link' : ''}">
+      <div class="rv-head">
+        ${by}
+        ${r.kind === 'link' ? '<span class="rv-kind">Resenha indicada</span>' : r.rating ? stars(r.rating) : ''}
+        <span class="rv-when">${esc(when(r.at))}</span>
+        ${own ? `<span class="rv-vis ${r.public ? 'is-pub' : ''}">${r.public ? 'Publicada' : 'Só você'}</span>` : ''}
+      </div>
+      ${r.text ? `<p class="rv-text">${esc(r.text)}</p>` : ''}
+      ${r.url ? `<a class="ext rv-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.source || hostOf(r.url))}${ICON_OUT}</a>` : ''}
+      ${own ? `<div class="rv-actions"><button type="button" class="link-btn" data-review-toggle="${esc(r.id)}">${r.public ? 'Deixar só para mim' : 'Publicar para os leitores'}</button><button type="button" class="link-btn" data-review-remove="${esc(r.id)}">Apagar</button></div>` : ''}
+    </li>`;
+  }
+
+  reviewFormHtml() {
+    const kind = this.reviewKind || 'own';
+    const signedIn = !!cloud.currentProfile();
+    return `<form class="review-form" data-review-form novalidate>
+      <div class="seg seg-sm" role="tablist" aria-label="Tipo de resenha">
+        <button type="button" role="tab" class="seg-btn${kind === 'own' ? ' is-on' : ''}" aria-selected="${kind === 'own'}" data-review-kind="own">Minha resenha</button>
+        <button type="button" role="tab" class="seg-btn${kind === 'link' ? ' is-on' : ''}" aria-selected="${kind === 'link'}" data-review-kind="link">Indicar uma resenha</button>
+      </div>
+      ${kind === 'own' ? `<fieldset class="rate"><legend>Sua nota</legend>
+          ${[1, 2, 3, 4, 5].map((i) => `<label><input type="radio" name="rating" value="${i}"><span class="sr">${i} ${i === 1 ? 'estrela' : 'estrelas'}</span>${STAR}</label>`).join('')}
+        </fieldset>
+        <label class="field"><span class="field-label">O que você achou</span><textarea name="text" rows="4" maxlength="2000" placeholder="O que ficou com você depois da leitura?"></textarea></label>`
+      : `<label class="field"><span class="field-label">Link da resenha</span><input name="url" inputmode="url" placeholder="https://… (blog, jornal, vídeo, Goodreads)" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Por que vale ler <span class="opt">(opcional)</span></span><textarea name="text" rows="3" maxlength="1000"></textarea></label>`}
+      <label class="check"><input type="checkbox" name="public" ${signedIn ? 'checked' : 'disabled'}><span>${signedIn ? 'Publicar para os leitores da casa' : 'Entre na sua conta (botão Leitores) para publicar'}</span></label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn btn-solid">${kind === 'own' ? 'Guardar resenha' : 'Guardar indicação'}</button>
+    </form>`;
+  }
+
+  renderReviews() {
+    const p = this.panel('resenhas');
+    if (!p || !this.book) return;
+    p.innerHTML = this.reviewsHtml(this.book);
+    this.loadHouseReviews(this.book, { cached: true });
+  }
+
+  onReviewSubmit(form) {
+    const err = form.querySelector('.form-error');
+    const kind = this.reviewKind || 'own';
+    const text = form.elements.text.value.trim();
+    const entry = { id: uid(), kind, text, public: !!(form.elements.public && form.elements.public.checked), at: new Date().toISOString() };
+    if (kind === 'own') {
+      const r = form.querySelector('input[name="rating"]:checked');
+      entry.rating = r ? +r.value : 0;
+      if (!entry.rating && !text) { err.textContent = 'Dê uma nota ou escreva o que achou.'; return; }
+    } else {
+      const url = normalizeUrl(form.elements.url.value);
+      if (!url) { err.textContent = 'Cole o link completo da resenha.'; form.elements.url.focus(); return; }
+      entry.url = url;
+      entry.source = hostOf(url);
+    }
+    const b = this.book;
+    store.updateBook(b.id, { reviews: [entry, ...(b.reviews || [])] });
+    this.renderReviews();
+    const first = this.panel('resenhas').querySelector('.reviews li');
+    if (first && !this.reduce) gsap.from(first, { opacity: 0, y: -10, duration: 0.4, ease: 'power3.out' });
+  }
+
+  async loadHouseReviews(b, { cached = false } = {}) {
+    const id = b.id;
+    if (!cloud.currentProfile()) return;
+    let feed = null;
+    try { feed = await cloud.loadFeed(); } catch (e) { return; }
+    if (this.id !== id) return;
+    const slot = this.info.querySelector('.house-reviews');
+    if (!slot) return;
+    const key = cloud.bookKey(b);
+    const me = cloud.currentProfile();
+    const owner = store.visiting();
+    const others = feed.reviews.filter((r) => r.key === key && r.who.id !== me.id && !(owner && r.who.id === owner.id));
+    const readingNow = feed.reading.filter((r) => r.key === key && r.who.id !== me.id);
+    slot.innerHTML = (readingNow.length ? `<p class="bv-text house-reading">${readingNow.map((r) => `<strong>${esc(r.who.display_name)}</strong>${r.page ? ` está na página ${nf.format(r.page)}${r.total ? ` de ${nf.format(r.total)}` : ''}` : ' está lendo'}`).join(' · ')}.</p>` : '')
+      + (others.length ? `<h3 class="bv-h">Dos leitores da casa</h3><ul class="reviews">${others.map((r) => this.reviewCard(r, r.who)).join('')}</ul>` : '');
+  }
+
+  setStatusUi(next) {
+    this.info.querySelectorAll('[data-status]').forEach((p) => {
+      const on = p.dataset.status === next;
+      p.classList.toggle('is-on', on);
+      p.setAttribute('aria-pressed', String(on));
+    });
+    const stamp = this.info.querySelector('[data-stamp]');
+    if (stamp) {
+      stamp.className = 'stamp' + (next ? ' is-' + next : '');
+      stamp.textContent = next ? STAMP[next] : '';
+      if (next && !this.reduce) gsap.fromTo(stamp, { scale: 1.6, opacity: 0, rotation: -18 }, { scale: 1, opacity: 1, rotation: -9, duration: 0.35, ease: 'back.out(2.2)' });
+    }
+    const st = this.book3d.querySelector('[data-status-text]');
+    if (st) st.textContent = next ? STATUS_TEXT[next] : 'Na estante';
+    this.renderProgress();
   }
 
   panel(id) { return this.info.querySelector('#bvp-' + id); }
@@ -168,11 +376,12 @@ export class BookView {
     try { ins = await bookInsights(b); } catch (e) { failed = true; }
     if (this.id !== id) return; // the reader moved on to another book
     this.insights = ins;
+    if (ins && ins.pages && this.book && !(this.book.progress || {}).total && !this.book.pageCount) this.renderProgress();
     const msg = failed
       ? '<p class="bv-loading">Não foi possível falar com a Open Library agora. Tente de novo daqui a pouco.</p>'
       : '<p class="bv-loading">A Open Library não tem esta obra cadastrada.</p>';
     if (!ins) {
-      TABS.slice(1).forEach(([t]) => { const p = t === 'ler' ? this.info.querySelector('.ler-auto') : this.panel(t); if (p) p.innerHTML = msg; });
+      TABS.slice(1).filter(([t]) => t !== 'resenhas').forEach(([t]) => { const p = t === 'ler' ? this.info.querySelector('.ler-auto') : this.panel(t); if (p) p.innerHTML = msg; });
       return;
     }
     this.info.querySelector('.ler-auto').innerHTML = this.readHtml(ins);
@@ -439,6 +648,31 @@ export class BookView {
     if (tabBtn) { this.switchTab(tabBtn.dataset.tab); return; }
     const addBtn = e.target.closest('[data-add-similar]');
     if (addBtn) { this.addSimilar(addBtn); return; }
+    const kindBtn = e.target.closest('[data-review-kind]');
+    if (kindBtn) { this.reviewKind = kindBtn.dataset.reviewKind; const f = this.info.querySelector('[data-review-form]'); if (f) { f.outerHTML = this.reviewFormHtml(); } return; }
+    const tg = e.target.closest('[data-review-toggle]');
+    if (tg) {
+      const b = this.book;
+      store.updateBook(b.id, { reviews: (b.reviews || []).map((r) => (r.id === tg.dataset.reviewToggle ? { ...r, public: !r.public } : r)) });
+      this.renderReviews();
+      return;
+    }
+    const rr = e.target.closest('[data-review-remove]');
+    if (rr) {
+      if (rr.dataset.armed !== '1') { rr.dataset.armed = '1'; rr.textContent = 'Confirmar'; setTimeout(() => { if (rr.isConnected) { rr.dataset.armed = ''; rr.textContent = 'Apagar'; } }, 3000); return; }
+      const b = this.book;
+      store.updateBook(b.id, { reviews: (b.reviews || []).filter((r) => r.id !== rr.dataset.reviewRemove) });
+      this.renderReviews();
+      return;
+    }
+    const stepBtn = e.target.closest('[data-step]');
+    if (stepBtn) {
+      const b = this.book;
+      this.saveProgress({ page: ((b.progress && b.progress.page) || 0) + +stepBtn.dataset.step });
+      const again = this.info.querySelector(`[data-step="${stepBtn.dataset.step}"]`);
+      if (again) again.focus();
+      return;
+    }
     const rm = e.target.closest('[data-remove-link]');
     if (rm) { this.removeLink(rm.dataset.removeLink); return; }
     const el = e.target.closest('[data-act],[data-status]');
@@ -447,19 +681,8 @@ export class BookView {
       const b = this.book;
       const next = b.status === el.dataset.status ? null : el.dataset.status;
       store.updateBook(this.id, { status: next });
-      this.info.querySelectorAll('[data-status]').forEach((p) => {
-        const on = p.dataset.status === next;
-        p.classList.toggle('is-on', on);
-        p.setAttribute('aria-pressed', String(on));
-      });
-      const stamp = this.info.querySelector('[data-stamp]');
-      if (stamp) {
-        stamp.className = 'stamp' + (next ? ' is-' + next : '');
-        stamp.textContent = next ? STAMP[next] : '';
-        if (next && !this.reduce) gsap.fromTo(stamp, { scale: 1.6, opacity: 0, rotation: -18 }, { scale: 1, opacity: 1, rotation: -9, duration: 0.35, ease: 'back.out(2.2)' });
-      }
-      const st = this.book3d.querySelector('[data-status-text]');
-      if (st) st.textContent = next ? STATUS_TEXT[next] : 'Na estante';
+      this.setStatusUi(next);
+      if (next === 'lendo') { const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
       return;
     }
     const act = el.dataset.act;
@@ -468,10 +691,13 @@ export class BookView {
     else if (act === 'prev' || act === 'next') this.step(act === 'next' ? 1 : -1);
     else if (act === 'remove') this.remove(el);
     else if (act === 'read-file') this.openReader();
+    else if (act === 'start-reading') { store.updateBook(this.id, { status: 'lendo' }); this.setStatusUi('lendo'); const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
     else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null }, { drive: true }); this.refreshDrive(); }
   }
 
   onChange(e) {
+    if (e.target.matches('[data-page], [data-range]')) { this.saveProgress({ page: +e.target.value }); return; }
+    if (e.target.matches('[data-total]')) { this.saveProgress({ total: +e.target.value }); return; }
     if (e.target.dataset.act === 'section' && this.id) {
       store.updateBook(this.id, { sectionId: e.target.value }, { moved: true });
       const b = this.book;

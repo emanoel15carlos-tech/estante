@@ -23,12 +23,19 @@ if (NO_API) {
 }
 
 const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const ui = { cat: 'todas', q: '', openId: null };
+const ui = { cat: 'todas', q: '', openId: null, status: 'todos' };
 
 const $tabs = document.getElementById('tabs');
 const $shelves = document.getElementById('shelves');
 const $lede = document.getElementById('lede');
 const $search = document.getElementById('busca');
+const $statusFilter = document.getElementById('status-filter');
+const STATUS_FILTERS = [
+  ['todos', 'Todos'],
+  ['lendo', 'Lendo'],
+  ['lido', 'Já lidos'],
+  ['quero', 'Quero ler'],
+];
 const $toast = document.getElementById('toast');
 
 /* ---------------- toast ---------------- */
@@ -46,7 +53,8 @@ function toast(text) {
 function visibleBooks() {
   const { books } = store.getState();
   const q = norm(ui.q);
-  return books.filter((b) => !q || norm(b.title + ' ' + (b.authors || []).join(' ') + ' ' + (b.isbn || '')).includes(q));
+  return books.filter((b) => (ui.status === 'todos' || b.status === ui.status)
+    && (!q || norm(b.title + ' ' + (b.authors || []).join(' ') + ' ' + (b.isbn || '')).includes(q)));
 }
 
 function renderLede() {
@@ -79,14 +87,31 @@ function renderTabs() {
     .join('');
 }
 
+function renderStatusFilter() {
+  const { books } = store.getState();
+  const n = (id) => (id === 'todos' ? books.length : books.filter((b) => b.status === id).length);
+  const hidden = store.isReadOnly() && !books.some((b) => b.status);
+  $statusFilter.hidden = hidden;
+  if (hidden && ui.status !== 'todos') ui.status = 'todos';
+  $statusFilter.innerHTML = '<span class="sf-label">Leitura</span>' + STATUS_FILTERS.map(([id, label]) => `<button type="button" class="sf-btn sf-${id}${ui.status === id ? ' is-on' : ''}" data-status-filter="${id}" aria-pressed="${ui.status === id}">
+      <span class="sf-dot" aria-hidden="true"></span>${label}<span class="sf-n">${n(id)}</span></button>`).join('');
+}
+
 function spineHtml(b, section) {
   const cn = store.callNumber(b, section);
   return `<span class="slot${b.id === ui.openId ? ' is-out' : ''}" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
     <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}${b.drive ? ', com arquivo no Drive' : ''}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
-      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}
+      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${progressBar(b)}${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}
       <span class="callno" aria-hidden="true">${cn.code ? `<span>${esc(cn.code)}</span>` : ''}<span>${esc(cn.cutter)}</span></span>
     </button>
   </span>`;
+}
+
+function progressBar(b) {
+  const pr = b.progress;
+  const total = (pr && pr.total) || b.pageCount;
+  if (b.status !== 'lendo' || !pr || !pr.page || !total) return '';
+  return `<span class="spine-progress" aria-hidden="true"><span style="height:${Math.min(100, Math.round((pr.page / total) * 100))}%"></span></span>`;
 }
 
 function shelfIds() {
@@ -101,7 +126,7 @@ function renderShelves({ flip = true } = {}) {
   const shown = sections.filter((s) => ui.cat === 'todas' || s.id === ui.cat);
   const html = shown.map((s) => {
     const bs = books.filter((b) => b.sectionId === s.id);
-    if (!bs.length && ui.q) return '';
+    if (!bs.length && (ui.q || ui.status !== 'todos')) return '';
     return `<section class="shelf" data-section="${esc(s.id)}" aria-labelledby="sh-${esc(s.id)}">
       <div class="shelf-back"><div class="shelf-row">
         ${bs.length ? bs.map((b) => spineHtml(b, s)).join('') : '<p class="shelf-empty">Prateleira vazia. Catalogue um livro nesta seção ou mova um para cá.</p>'}
@@ -111,7 +136,12 @@ function renderShelves({ flip = true } = {}) {
       </div>
     </section>`;
   }).join('');
-  $shelves.innerHTML = html || `<div class="empty">
+  const label = (STATUS_FILTERS.find(([id]) => id === ui.status) || [])[1];
+  $shelves.innerHTML = html || (ui.status !== 'todos' && !ui.q ? `<div class="empty">
+      <p class="serif">Nenhum livro em “${esc(label)}”${ui.cat !== 'todas' ? ' nesta seção' : ''}.</p>
+      <p class="small">Abra um livro e marque Quero ler, Lendo ou Lido na ficha.</p>
+      <button type="button" class="btn" data-status-filter="todos">Ver todos os livros</button>
+    </div>` : '') || `<div class="empty">
       <p class="serif">Nada no acervo com esse nome.</p>
       <p class="small">Confira a grafia, ou catalogue o livro pela busca nas APIs.</p>
       <button type="button" class="btn btn-brass" data-add-from-empty>Catalogar livro</button>
@@ -134,6 +164,9 @@ function patchSpine(id) {
   el.style.background = b.color;
   el.style.color = b.ink;
   el.classList.toggle('is-read', b.status === 'lido');
+  el.querySelector('.spine-progress')?.remove();
+  const bar = progressBar(b);
+  if (bar) el.querySelector('.read-dot').insertAdjacentHTML('afterend', bar);
 }
 
 function dropShelves() {
@@ -167,6 +200,7 @@ function landNewBook(id) {
 /* ---------------- wiring ---------------- */
 renderLede();
 renderTabs();
+renderStatusFilter();
 renderShelves({ flip: false });
 
 let bookcase = null;
@@ -189,6 +223,7 @@ const view = new BookView({
     ui.openId = id;
     if (prev) $shelves.querySelector(`.slot[data-book="${CSS.escape(prev)}"]`)?.classList.remove('is-out');
     if (id) $shelves.querySelector(`.slot[data-book="${CSS.escape(id)}"]`)?.classList.add('is-out');
+    if (!id && ui.status !== 'todos') setTimeout(() => { if (!ui.openId) renderShelves(); }, 900);
   },
 });
 
@@ -212,6 +247,7 @@ function setVisiting(p) {
     document.getElementById('visit-mono').textContent = (p.display_name.trim()[0] || '?').toUpperCase();
     view.close && ui.openId && view.close();
     ui.cat = 'todas';
+    ui.status = 'todos';
     ui.q = '';
     $search.value = '';
     renderTabs();
@@ -225,6 +261,17 @@ const readers = new Readers({
   reduce,
   toast,
   onVisit: (p) => setVisiting(p),
+  openBook: (id) => {
+    const slot = $shelves.querySelector(`.slot[data-book="${CSS.escape(id)}"] .spine`);
+    if (!store.getState().books.some((b) => b.id === id)) { toast('Esse livro não está mais na estante.'); return; }
+    if (slot) {
+      slot.scrollIntoView({ block: 'center', behavior: 'auto' });
+      const r = slot.getBoundingClientRect();
+      view.open(id, { left: r.left, top: r.top, width: r.width, height: r.height }, { returnFocus: slot });
+    } else {
+      view.open(id, { left: innerWidth / 2 - 20, top: innerHeight / 2 - 120, width: 40, height: 240 });
+    }
+  },
   onLeave: () => { setVisiting(null); renderTabs(); renderShelves({ flip: false }); toast('De volta à sua estante.'); },
 });
 cloud.boot();
@@ -234,14 +281,32 @@ document.getElementById('open-sections').addEventListener('click', () => section
 
 store.subscribe((state, meta) => {
   renderLede();
-  if (meta.updated && !meta.moved && !meta.section && !meta.drive) {
+  renderStatusFilter();
+  if (meta.updated && !meta.moved && !meta.section && !meta.drive && ui.status === 'todos') {
     patchSpine(meta.updated);
     renderTabs();
+  } else if (meta.updated && !meta.moved && !meta.section && !meta.drive) {
+    // A filtered shelf may lose or gain this book; keep the open book's slot in place.
+    patchSpine(meta.updated);
+    renderTabs();
+    clearTimeout(renderShelves.later);
+    renderShelves.later = setTimeout(() => { if (!ui.openId) renderShelves(); }, 50);
   } else {
     renderTabs();
     renderShelves({ flip: !meta.added && !meta.reset });
   }
   if (bookcase) bookcase.setBooks(state.books);
+});
+
+function setStatusFilter(id) {
+  if (id === ui.status) return;
+  ui.status = id;
+  renderStatusFilter();
+  renderShelves();
+}
+$statusFilter.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-status-filter]');
+  if (t) setStatusFilter(t.dataset.statusFilter);
 });
 
 $tabs.addEventListener('click', (e) => {
@@ -261,6 +326,8 @@ $shelves.addEventListener('click', (e) => {
     return;
   }
   if (e.target.closest('[data-add-from-empty]')) add.open();
+  const sf = e.target.closest('[data-status-filter]');
+  if (sf) setStatusFilter(sf.dataset.statusFilter);
 });
 
 $search.addEventListener('input', debounce(() => {

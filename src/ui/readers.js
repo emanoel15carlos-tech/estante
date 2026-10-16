@@ -3,6 +3,9 @@ import { gsap } from 'gsap';
 import * as cloud from '../lib/cloud.js';
 import * as store from '../lib/store.js';
 import { esc } from '../lib/util.js';
+import { stars, when } from './bookView.js';
+
+const nf = new Intl.NumberFormat('pt-BR');
 
 const initial = (name) => (String(name || '?').trim()[0] || '?').toUpperCase();
 const fmtDate = (iso) => {
@@ -31,7 +34,9 @@ function message(e) {
 }
 
 export class Readers {
-  constructor({ reduce, toast, onVisit, onLeave }) {
+  constructor({ reduce, toast, onVisit, onLeave, openBook }) {
+    this.openBook = openBook;
+    this.homeTab = 'mural';
     this.reduce = reduce;
     this.toast = toast;
     this.onVisit = onVisit;
@@ -50,6 +55,11 @@ export class Readers {
     this.root.querySelectorAll('[data-close-readers]').forEach((b) => b.addEventListener('click', () => this.close()));
     this.body.addEventListener('submit', (e) => { e.preventDefault(); this.onSubmit(e.target); });
     this.body.addEventListener('click', (e) => this.onClick(e));
+    this.body.addEventListener('change', (e) => {
+      if (!e.target.matches('[data-share]')) return;
+      store.setSettings({ shareReading: e.target.checked });
+      this.toast(e.target.checked ? 'Os leitores da casa veem o que você está lendo.' : 'Seu status e página agora ficam só com você.');
+    });
     document.addEventListener('keydown', (e) => {
       if (!this.root.hidden && e.key === 'Escape') { e.preventDefault(); this.close(); }
     });
@@ -114,6 +124,7 @@ export class Readers {
     else {
       this.body.innerHTML = this.homeHtml(p);
       this.loadPeople();
+      this.loadMural();
     }
   }
 
@@ -209,13 +220,18 @@ export class Readers {
           <p class="rc-user">@${esc(p.username)}${n !== '' ? ` · ${n} ${n === 1 ? 'volume' : 'volumes'}` : ''}</p>
           <p class="rc-sync" data-sync></p>
         </div>
+        <label class="check rc-share"><input type="checkbox" data-share ${store.settings().shareReading ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar aos leitores o que estou lendo, o que já li e em que página estou</span></label>
         <div class="rc-actions">
           <button type="button" class="btn" data-act="copy">Copiar link da minha estante</button>
           <button type="button" class="link-btn" data-act="signout">Sair</button>
         </div>
       </article>
-      <h3 class="rd-h">Leitores da casa</h3>
-      <ol class="reader-list" data-people aria-live="polite"><li class="rd-loading">Abrindo o registro…</li></ol>
+      <div class="seg rd-tabs" role="tablist" aria-label="Registro">
+        <button type="button" role="tab" class="seg-btn${this.homeTab === 'mural' ? ' is-on' : ''}" aria-selected="${this.homeTab === 'mural'}" data-home-tab="mural">Mural de leituras</button>
+        <button type="button" role="tab" class="seg-btn${this.homeTab === 'people' ? ' is-on' : ''}" aria-selected="${this.homeTab === 'people'}" data-home-tab="people">Leitores da casa</button>
+      </div>
+      <div data-home-panel="mural"${this.homeTab === 'mural' ? '' : ' hidden'}><div class="mural" data-mural aria-live="polite"><p class="rd-loading">Abrindo o mural…</p></div></div>
+      <div data-home-panel="people"${this.homeTab === 'people' ? '' : ' hidden'}><ol class="reader-list" data-people aria-live="polite"><li class="rd-loading">Abrindo o registro…</li></ol></div>
     </div>`;
   }
 
@@ -267,6 +283,62 @@ export class Readers {
       </button></li>`;
     }).join('');
     if (!this.reduce) gsap.from(list.children, { opacity: 0, y: 10, duration: 0.4, ease: 'power3.out', stagger: 0.04 });
+  }
+
+  async loadMural({ fresh = false } = {}) {
+    const box = this.body.querySelector('[data-mural]');
+    if (!box) return;
+    let feed;
+    try {
+      if (!fresh) await cloud.pushNow();
+      feed = await cloud.loadFeed({ fresh: true });
+    } catch (e) {
+      box.innerHTML = `<p class="rd-loading">Não deu para abrir o mural: ${esc(message(e))}</p>`;
+      return;
+    }
+    if (!box.isConnected) return;
+    const me = cloud.currentProfile();
+    const name = (w) => (w.id === me.id ? 'Você' : w.display_name);
+    const thumb = (r) => r.cover
+      ? `<img class="mu-cover" src="${esc(r.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : `<span class="mu-cover drawn" style="background:${esc(r.color || '#6b4a2b')};color:${esc(r.ink || '#f3ead8')}" aria-hidden="true">${esc(String(r.title || '').slice(0, 18))}</span>`;
+    const reading = feed.reading.slice(0, 12).map((r) => {
+      const pct = r.total ? Math.min(100, Math.round((r.page / r.total) * 100)) : 0;
+      return `<li><button type="button" class="mu-reading" data-open-book="${esc(r.bookId)}" data-owner="${esc(r.who.username)}">
+        ${thumb(r)}
+        <span class="mu-body"><span class="mu-who">${esc(name(r.who))}</span><span class="mu-title serif">${esc(r.title)}</span>
+        <span class="mu-meta">${r.page ? `pág. ${nf.format(r.page)}${r.total ? ` de ${nf.format(r.total)}` : ''}` : 'começou a ler'}</span>
+        ${r.total ? `<span class="bm-bar" aria-hidden="true"><span style="width:${pct}%"></span></span>` : ''}</span>
+      </button></li>`;
+    }).join('');
+    const reviews = feed.reviews.slice(0, 40).map((r) => `<li class="mu-review">
+      <button type="button" class="mu-book" data-open-book="${esc(r.bookId)}" data-owner="${esc(r.who.username)}" aria-label="Abrir ${esc(r.title)}">${thumb(r)}</button>
+      <div class="mu-body">
+        <p class="mu-line"><span class="mono sm" aria-hidden="true">${esc(initial(r.who.display_name))}</span><strong>${esc(name(r.who))}</strong> ${r.kind === 'link' ? 'indicou uma resenha de' : 'escreveu sobre'} <button type="button" class="mu-link serif" data-open-book="${esc(r.bookId)}" data-owner="${esc(r.who.username)}">${esc(r.title)}</button><span class="mu-meta"> · ${esc((r.authors || [])[0] || '')} · ${esc(when(r.at))}</span></p>
+        ${r.kind !== 'link' && r.rating ? stars(r.rating) : ''}
+        ${r.text ? `<p class="rv-text">${esc(r.text)}</p>` : ''}
+        ${r.url ? `<a class="ext rv-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.source || r.url)}</a>` : ''}
+      </div>
+    </li>`).join('');
+    box.innerHTML = `
+      <h3 class="rd-h">Lendo agora</h3>
+      ${reading ? `<ol class="mu-reading-list">${reading}</ol>` : '<p class="rd-empty-line">Ninguém marcou um livro como “Lendo” ainda. Na ficha do livro, marque Lendo e registre a página.</p>'}
+      <h3 class="rd-h">Resenhas publicadas</h3>
+      ${reviews ? `<ol class="mu-reviews">${reviews}</ol>` : '<p class="rd-empty-line">Nenhuma resenha publicada ainda. Abra um livro, vá em Resenhas e publique a primeira.</p>'}`;
+    if (!this.reduce) gsap.from(box.querySelectorAll('li'), { opacity: 0, y: 10, duration: 0.4, ease: 'power3.out', stagger: 0.03 });
+  }
+
+  async openFromMural(owner, bookId) {
+    const me = cloud.currentProfile();
+    if (me && owner === me.username) {
+      if (store.isReadOnly()) this.leave();
+    } else {
+      const v = store.visiting();
+      if (!v || v.username !== owner) await this.visit(owner);
+      if (!store.visiting() || store.visiting().username !== owner) return;
+    }
+    this.close();
+    setTimeout(() => this.openBook(bookId), this.reduce ? 0 : 320);
   }
 
   /* ---------------- actions ---------------- */
@@ -325,6 +397,15 @@ export class Readers {
     const act = e.target.closest('[data-act]');
     if (act && act.dataset.act === 'signout') { this.signOut(); return; }
     if (act && act.dataset.act === 'copy') { this.copyLink(act); return; }
+    const ht = e.target.closest('[data-home-tab]');
+    if (ht) {
+      this.homeTab = ht.dataset.homeTab;
+      this.body.querySelectorAll('[data-home-tab]').forEach((b) => { const on = b === ht; b.classList.toggle('is-on', on); b.setAttribute('aria-selected', String(on)); });
+      this.body.querySelectorAll('[data-home-panel]').forEach((p) => { p.hidden = p.dataset.homePanel !== this.homeTab; });
+      return;
+    }
+    const ob = e.target.closest('[data-open-book]');
+    if (ob) { this.openFromMural(ob.dataset.owner, ob.dataset.openBook); return; }
     const visit = e.target.closest('[data-visit]');
     if (visit) this.visit(visit.dataset.visit);
   }

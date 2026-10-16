@@ -10,7 +10,10 @@ const URL_ = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://
 // Public "anon" key: safe in the browser, access is governed by the policies in the database.
 const ANON = (import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0Z2R0ZGtpZWlxc3RtcXVyb2xsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxMTQ4NTMsImV4cCI6MjEwNzY5MDg1M30.k8KjHTxTxAvF3m4KTfbbGQX0DMln5MDFfVj7_M5ljVY';
 
-export const PRIVATE_FIELDS = ['links', 'drive', 'status'];
+// Always private: personal links and the Drive file. Reading status and page are shared
+// unless the reader turns that off; each review says whether it is published.
+export const PRIVATE_FIELDS = ['links', 'drive'];
+export const READING_FIELDS = ['status', 'progress'];
 const OWNER_KEY = 'estante:owner';
 const DIRTY_KEY = 'estante:dirty';
 
@@ -20,36 +23,78 @@ export const sb = createClient(URL_, ANON, {
 
 /* ---------------- splitting the collection ---------------- */
 
+const plainCover = (c) => (c && !String(c).startsWith('data:') ? c : null);
+const fold = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** Same book on two shelves: title + author surname, without accents or punctuation. */
+export function bookKey(b) {
+  const surname = fold((b.authors || [])[0] || '').split(' ').pop() || '';
+  return fold(b.searchTitle || b.title) + '|' + surname;
+}
+
+const has = (v) => v !== undefined && v !== null && !(Array.isArray(v) && !v.length);
+
 /** Splits the collection into what friends may see and what stays with the owner. */
 export function splitState(state) {
+  const share = !(state.settings && state.settings.shareReading === false);
   const priv = {};
+  const reviews = [];
+  const reading = [];
   const books = state.books.map((b) => {
     const pub = { ...b };
     const mine = {};
-    for (const k of PRIVATE_FIELDS) {
-      if (pub[k] !== undefined && pub[k] !== null && !(Array.isArray(pub[k]) && !pub[k].length)) mine[k] = pub[k];
+    const hidden = share ? PRIVATE_FIELDS : [...PRIVATE_FIELDS, ...READING_FIELDS];
+    for (const k of hidden) {
+      if (has(pub[k])) mine[k] = pub[k];
       delete pub[k];
     }
+    if (Array.isArray(b.reviews)) {
+      pub.reviews = b.reviews.filter((r) => r.public);
+      const own = b.reviews.filter((r) => !r.public);
+      if (own.length) mine.reviews = own;
+      if (!pub.reviews.length) delete pub.reviews;
+    }
     if (Object.keys(mine).length) priv[b.id] = mine;
+    const info = { bookId: b.id, key: bookKey(b), title: b.title, authors: (b.authors || []).slice(0, 2), cover: plainCover(b.cover), color: b.color, ink: b.ink };
+    (pub.reviews || []).forEach((r) => reviews.push({ ...info, ...r }));
+    if (share && b.status === 'lendo') reading.push({ ...info, page: (b.progress && b.progress.page) || 0, total: (b.progress && b.progress.total) || b.pageCount || 0, at: (b.progress && b.progress.at) || null });
     return pub;
   });
+  reviews.sort((x, y) => String(y.at).localeCompare(String(x.at)));
   return {
     pub: {
-      v: 1,
+      v: 2,
       seedVersion: state.seedVersion,
       removedSections: state.removedSections || [],
       sections: state.sections,
       books,
-      summary: { count: books.length, sections: state.sections.length, covers: books.filter((b) => b.cover && !String(b.cover).startsWith('data:')).slice(-4).map((b) => b.cover) },
+      reviews: reviews.slice(0, 200),
+      reading,
+      summary: {
+        count: books.length,
+        sections: state.sections.length,
+        reading: reading.length,
+        read: share ? books.filter((b) => b.status === 'lido').length : null,
+        reviews: reviews.length,
+        covers: books.map((b) => plainCover(b.cover)).filter(Boolean).slice(-4),
+      },
     },
-    priv: { v: 1, books: priv },
+    priv: { v: 2, books: priv, settings: state.settings || {} },
   };
 }
 
 export function joinState(pub, priv) {
   const extra = (priv && priv.books) || {};
-  const { summary, v, ...rest } = pub || {};
-  return { ...rest, books: (rest.books || []).map((b) => ({ ...b, ...(extra[b.id] || {}) })) };
+  const { summary, v, reviews, reading, ...rest } = pub || {};
+  const books = (rest.books || []).map((b) => {
+    const e = extra[b.id] || {};
+    const out = { ...b, ...e };
+    if (b.reviews || e.reviews) out.reviews = [...(b.reviews || []), ...(e.reviews || [])].sort((x, y) => String(y.at).localeCompare(String(x.at)));
+    return out;
+  });
+  const out = { ...rest, books };
+  if (priv && priv.settings) out.settings = priv.settings;
+  return out;
 }
 
 /* ---------------- session ---------------- */
@@ -125,6 +170,33 @@ export async function listReaders() {
   const byId = new Map((shelves || []).map((s) => [s.user_id, s]));
   return (people || []).map((p) => ({ ...p, shelf: byId.get(p.id) || null }));
 }
+
+let feedCache = null;
+/** Published reviews and current reads of everyone in the house. Cached for a minute. */
+export async function loadFeed({ fresh = false } = {}) {
+  if (!fresh && feedCache && Date.now() - feedCache.t < 60000) return feedCache.data;
+  const [{ data: people, error }, { data: shelves, error: e2 }] = await Promise.all([
+    sb.from('profiles').select('id, username, display_name'),
+    sb.from('shelves').select('user_id, updated_at, reviews:data->reviews, reading:data->reading'),
+  ]);
+  if (error) throw error;
+  if (e2) throw e2;
+  const who = new Map((people || []).map((p) => [p.id, p]));
+  const reviews = [];
+  const reading = [];
+  for (const s of shelves || []) {
+    const p = who.get(s.user_id);
+    if (!p) continue;
+    (s.reviews || []).forEach((r) => reviews.push({ ...r, who: p }));
+    (s.reading || []).forEach((r) => reading.push({ ...r, who: p }));
+  }
+  reviews.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  reading.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  const data = { reviews, reading };
+  feedCache = { t: Date.now(), data };
+  return data;
+}
+export const dropFeedCache = () => { feedCache = null; };
 
 export async function loadShelf(username) {
   const { data: p, error } = await sb.from('profiles').select('id, username, display_name').eq('username', username.toLowerCase()).maybeSingle();
@@ -228,6 +300,7 @@ export function pushNow(force = false) {
     if (err) { setStatus('error', err); return; }
     ls.set(DIRTY_KEY, null);
     ls.set(OWNER_KEY, user.id);
+    feedCache = null;
     setStatus('saved');
   }).catch((e) => setStatus('error', e));
   return pushing;
