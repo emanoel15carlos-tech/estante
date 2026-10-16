@@ -98,3 +98,21 @@ test('parseDrive recognises Drive and Docs links', () => {
   assert.equal(parseDrive('https://example.com/file/d/1AbCdEfGhIjKlMnOp'), null);
   assert.equal(parseDrive('javascript:alert(1)'), null);
 });
+
+test('cloud split keeps links, Drive file and status private', async () => {
+  const { splitState, joinState } = await import('../src/lib/cloud.js');
+  const state = { seedVersion: 3, removedSections: [], sections: [{ id: 'fi', name: 'Ficção' }], books: [
+    { id: 'a', title: 'A', status: 'lido', links: [{ id: 'l', url: 'https://x.org' }], drive: { id: 'D' }, cover: 'https://c/a.jpg' },
+    { id: 'b', title: 'B', links: [] },
+  ] };
+  const { pub, priv } = splitState(state);
+  assert.equal(JSON.stringify(pub).includes('x.org'), false);
+  assert.equal(JSON.stringify(pub).includes('lido'), false);
+  assert.deepEqual(Object.keys(priv.books), ['a']);
+  assert.equal(pub.summary.count, 2);
+  const back = joinState(pub, priv);
+  assert.equal(back.books[0].status, 'lido');
+  assert.equal(back.books[0].drive.id, 'D');
+  assert.equal(back.summary, undefined);
+  assert.equal(joinState(pub, null).books[0].status, undefined);
+});

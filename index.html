@@ -19,12 +19,18 @@
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5"/></svg>
         <input id="busca" type="search" placeholder="Consultar o acervo" autocomplete="off">
       </div>
+      <button type="button" class="account-chip" id="open-readers" aria-haspopup="dialog"><span class="chip-name">Leitores</span></button>
       <button type="button" class="btn btn-brass" id="open-add">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8"/></svg>
         Catalogar livro
       </button>
     </div>
   </header>
+
+  <div class="visit-bar wrap" id="visit-bar" hidden>
+    <p><span class="mono sm" id="visit-mono" aria-hidden="true"></span>Você está visitando a estante de <strong id="visit-name"></strong> <span class="visit-ro">· só para ver</span></p>
+    <button type="button" class="btn btn-brass" id="visit-leave">Voltar para a minha estante</button>
+  </div>
 
   <section class="intro wrap">
     <h1 class="serif">Cada livro <span>no seu lugar.</span></h1>
@@ -169,6 +175,23 @@
         <button type="submit" class="btn btn-solid">Criar seção</button>
       </form>
     </aside>
+  </div>
+
+  <!-- Readers (accounts) -->
+  <div class="readers" id="readers" hidden>
+    <button type="button" class="scrim" data-close-readers aria-label="Fechar" tabindex="-1"></button>
+    <div class="readers-sheet paper" role="dialog" aria-modal="true" aria-labelledby="readers-title">
+      <div class="readers-head">
+        <div>
+          <p class="rd-kicker">Estante · biblioteca particular</p>
+          <h2 id="readers-title" class="serif">Registro de leitores</h2>
+        </div>
+        <button type="button" class="icon-btn readers-close" data-close-readers aria-label="Fechar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+      </div>
+      <div class="readers-body" id="readers-body"></div>
+    </div>
   </div>
 
   <!-- Drive reader -->

@@ -109,7 +109,9 @@ export class BookView {
       prov = `Capa: ${esc(SOURCE_LABEL[b.coverSource])}`;
     }
     const tab = this.tab || 'sobre';
+    const ro = store.isReadOnly();
     const cn = store.callNumber(b, section);
+    this.info.classList.toggle('is-ro', ro);
     this.info.innerHTML = `
       <span class="stamp${b.status ? ' is-' + b.status : ''}" data-stamp aria-hidden="true">${b.status ? STAMP[b.status] : ''}</span>
       <div>
@@ -122,6 +124,7 @@ export class BookView {
       </div>
       <div class="bv-panel" role="tabpanel" id="bvp-sobre" aria-labelledby="bvt-sobre"${tab === 'sobre' ? '' : ' hidden'}>
         ${b.synopsis ? `<p class="synopsis">${esc(b.synopsis)}</p>` : '<p class="synopsis none">Sem sinopse cadastrada.</p>'}
+        ${ro ? `<p class="bv-note">Estante de ${esc(store.visiting().display_name)}: você está só olhando.</p>` : ''}
         <div class="pills" role="group" aria-label="Status de leitura">
           ${STATUS.map(([id, label]) => `<button type="button" class="pill${b.status === id ? ' is-on' : ''}" data-status="${id}" aria-pressed="${b.status === id}">${label}</button>`).join('')}
         </div>
@@ -182,6 +185,7 @@ export class BookView {
   }
 
   driveHtml(b) {
+    if (store.isReadOnly()) return '';
     const d = b.drive;
     if (d) {
       return `<section class="drive-box has-file" aria-labelledby="dr-h">
@@ -262,6 +266,7 @@ export class BookView {
   }
 
   myLinksHtml(b) {
+    if (store.isReadOnly()) return '';
     const links = b.links || [];
     return `<section class="my-links" aria-labelledby="ml-h">
       <h3 class="bv-h" id="ml-h">Meus links</h3>

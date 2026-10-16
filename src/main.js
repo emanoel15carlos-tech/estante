@@ -10,6 +10,8 @@ import { Bookcase } from './scene/bookcase.js';
 import { BookView } from './ui/bookView.js';
 import { AddBook } from './ui/addBook.js';
 import { SectionsPanel } from './ui/sections.js';
+import { Readers } from './ui/readers.js';
+import * as cloud from './lib/cloud.js';
 
 gsap.registerPlugin(ScrollTrigger, Flip);
 
@@ -51,6 +53,11 @@ function renderLede() {
   const { books, sections } = store.getState();
   const read = books.filter((b) => b.status === 'lido').length;
   const n = books.length;
+  const guest = store.visiting();
+  if (guest) {
+    $lede.textContent = `A estante de ${guest.display_name} tem ${n} ${n === 1 ? 'volume' : 'volumes'} em ${sections.length} ${sections.length === 1 ? 'seção' : 'seções'}. Abra qualquer livro para ver a ficha.`;
+    return;
+  }
   $lede.textContent = n
     ? `Uma biblioteca para guardar, encontrar e lembrar o que você lê. O acervo tem ${n} ${n === 1 ? 'volume' : 'volumes'} em ${sections.length} ${sections.length === 1 ? 'seção' : 'seções'}, e ${read} ${read === 1 ? 'já foi lido' : 'já foram lidos'}.`
     : 'O acervo está vazio. Catalogue o primeiro livro pela busca ou à mão.';
@@ -195,6 +202,32 @@ const add = new AddBook({
     }
   },
 });
+
+const $visitBar = document.getElementById('visit-bar');
+function setVisiting(p) {
+  document.body.classList.toggle('is-visiting', !!p);
+  $visitBar.hidden = !p;
+  if (p) {
+    document.getElementById('visit-name').textContent = p.display_name;
+    document.getElementById('visit-mono').textContent = (p.display_name.trim()[0] || '?').toUpperCase();
+    view.close && ui.openId && view.close();
+    ui.cat = 'todas';
+    ui.q = '';
+    $search.value = '';
+    renderTabs();
+    renderShelves({ flip: false });
+    dropShelves();
+    window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+    if (!reduce) gsap.from($visitBar, { y: -20, opacity: 0, duration: 0.5, ease: 'expo.out' });
+  }
+}
+const readers = new Readers({
+  reduce,
+  toast,
+  onVisit: (p) => setVisiting(p),
+  onLeave: () => { setVisiting(null); renderTabs(); renderShelves({ flip: false }); toast('De volta à sua estante.'); },
+});
+cloud.boot();
 
 const sectionsPanel = new SectionsPanel({ reduce, onChanged: (msg) => { if (msg) toast(msg); } });
 document.getElementById('open-sections').addEventListener('click', () => sectionsPanel.open());

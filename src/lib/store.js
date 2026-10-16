@@ -306,10 +306,37 @@ export function subscribe(fn) {
   return () => listeners.delete(fn);
 }
 
+// While visiting a friend's shelf the state is theirs, read-only and never saved.
+let visit = null; // { owner, own }
+
+export const isReadOnly = () => !!visit;
+export const visiting = () => (visit ? visit.owner : null);
+
 function commit(next, meta = {}) {
+  if (visit) return; // nothing changes a borrowed shelf
   state = next;
   persist();
   listeners.forEach((fn) => fn(state, meta));
+}
+
+/** Replaces the whole collection (account data from the cloud, or a fresh start). */
+export function replaceAll(data, meta = {}) {
+  const ok = data && Array.isArray(data.books) && Array.isArray(data.sections);
+  commit(ok ? migrate({ removedSections: [], ...data }) : seed(), { reset: true, ...meta });
+}
+
+export function startVisit(owner, data) {
+  const own = visit ? visit.own : state;
+  visit = { owner, own };
+  state = { removedSections: [], ...data, books: data.books || [], sections: data.sections || [] };
+  listeners.forEach((fn) => fn(state, { reset: true, visit: true }));
+}
+
+export function endVisit() {
+  if (!visit) return;
+  state = visit.own;
+  visit = null;
+  listeners.forEach((fn) => fn(state, { reset: true, visit: true }));
 }
 
 export function findDuplicate(candidate) {
