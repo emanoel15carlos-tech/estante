@@ -3,7 +3,7 @@
 import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
 import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
-import { esc, hostOf, normalizeUrl, uid } from '../lib/util.js';
+import { esc, hostOf, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
 const STATUS = [
   ['quero', 'Quero ler'],
@@ -22,6 +22,7 @@ const TABS = [
 ];
 const nf = new Intl.NumberFormat('pt-BR');
 const ICON_OUT = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M5 2h7v7M12 2L5.5 8.5M10 9.5V12H2V4h2.5" stroke="currentColor" stroke-width="1.4"/></svg>';
+const DRIVE_ICON = '<svg width="22" height="20" viewBox="0 0 22 20" fill="none" aria-hidden="true"><path d="M7.5 1h7l7 12-3.5 6h-14L.5 13l7-12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.5 1l7 12M14.5 1l-7 12M.5 13h21" stroke="currentColor" stroke-width="1.4"/></svg>';
 const ext = (url, label) => `<a class="ext" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}${ICON_OUT}</a>`;
 
 const EMBLEM = '<svg width="92" height="92" viewBox="0 0 92 92" fill="none" aria-hidden="true"><circle cx="46" cy="46" r="44" stroke="currentColor"/><circle cx="46" cy="46" r="30" stroke="currentColor"/><path d="M46 2v88M2 46h88" stroke="currentColor"/></svg>';
@@ -45,15 +46,20 @@ export class BookView {
     this.scrim.addEventListener('click', () => this.close());
     this.closeBtn = this.root.querySelector('.card-close');
     this.closeBtn.addEventListener('click', () => this.close());
+    const reader = document.getElementById('reader');
+    reader.querySelectorAll('[data-close-reader]').forEach((x) => x.addEventListener('click', () => this.closeReader()));
     this.info.addEventListener('click', (e) => this.onClick(e));
     this.info.addEventListener('change', (e) => this.onChange(e));
     this.info.addEventListener('submit', (e) => {
+      const drive = e.target.closest('[data-drive-form]');
+      if (drive) { e.preventDefault(); this.onDriveSubmit(drive); return; }
       const form = e.target.closest('[data-link-form]');
       if (!form) return;
       e.preventDefault();
       this.onLinkSubmit(form);
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.closeReader()) { e.preventDefault(); return; }
       if (this.id && e.key === 'Escape') { e.preventDefault(); this.close(); }
     });
   }
@@ -127,9 +133,10 @@ export class BookView {
         </div>
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
       </div>
-      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
+      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
         <button type="button" class="btn btn-solid" data-act="cover">${this.coverOpen ? 'Fechar livro' : 'Abrir livro'}</button>
+        ${b.drive ? '<button type="button" class="btn btn-drive" data-act="read-file">' + DRIVE_ICON + 'Ler o arquivo</button>' : ''}
         <button type="button" class="btn" data-act="prev" aria-label="Livro anterior"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.6"/></svg>Anterior</button>
         <button type="button" class="btn" data-act="next" aria-label="Próximo livro">Próximo<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>`;
@@ -174,6 +181,86 @@ export class BookView {
     this.loadPortuguese(b, ins, id);
   }
 
+  driveHtml(b) {
+    const d = b.drive;
+    if (d) {
+      return `<section class="drive-box has-file" aria-labelledby="dr-h">
+        <h3 class="bv-h" id="dr-h">Meu arquivo no Drive</h3>
+        <div class="drive-card">
+          <span class="drive-icon">${DRIVE_ICON}</span>
+          <div class="drive-meta"><strong>${esc(d.name || d.label)}</strong><span>${esc(d.label)}${d.name ? '' : ' · anexado por você'}</span></div>
+        </div>
+        <div class="row">
+          <button type="button" class="btn btn-solid" data-act="read-file">Ler aqui</button>
+          <a class="btn" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
+          <button type="button" class="link-btn" data-act="drive-remove">Desanexar</button>
+        </div>
+        <p class="bv-note">Para abrir aqui no site, o arquivo precisa estar compartilhado no Drive como “Qualquer pessoa com o link”. Se for privado, use “Abrir no Drive”.</p>
+      </section>`;
+    }
+    return `<section class="drive-box" aria-labelledby="dr-h">
+      <h3 class="bv-h" id="dr-h">Meu arquivo no Drive</h3>
+      <form class="link-form" data-drive-form novalidate>
+        <label class="field"><span class="field-label">Link do Google Drive</span><input name="url" inputmode="url" placeholder="https://drive.google.com/file/d/…" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Nome do arquivo <span class="opt">(opcional)</span></span><input name="name" maxlength="80" placeholder="Ex.: Dom Casmurro, edição 1899 (PDF)" autocomplete="off"></label>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn">Anexar arquivo</button>
+      </form>
+    </section>`;
+  }
+
+  onDriveSubmit(form) {
+    const err = form.querySelector('.form-error');
+    const raw = form.elements.url.value.trim();
+    const d = parseDrive(raw);
+    if (!d) {
+      err.textContent = raw ? 'Esse não parece um link do Google Drive. No Drive, clique em Compartilhar › Copiar link e cole aqui.' : 'Cole o link do arquivo no Drive.';
+      form.elements.url.focus();
+      return;
+    }
+    const name = form.elements.name.value.trim();
+    store.updateBook(this.id, { drive: { ...d, name } }, { drive: true });
+    this.refreshDrive();
+  }
+
+  refreshDrive() {
+    const b = this.book;
+    const box = this.info.querySelector('.drive-box');
+    if (box) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this.driveHtml(b);
+      box.replaceWith(tmp.firstElementChild);
+    }
+    const actions = this.info.querySelector('.bv-actions');
+    const btn = actions && actions.querySelector('[data-act="read-file"]');
+    if (b.drive && !btn && actions) actions.querySelector('[data-act="cover"]').insertAdjacentHTML('afterend', '<button type="button" class="btn btn-drive" data-act="read-file">' + DRIVE_ICON + 'Ler o arquivo</button>');
+    if (!b.drive && btn) btn.remove();
+  }
+
+  openReader() {
+    const b = this.book;
+    if (!b || !b.drive) return;
+    const r = document.getElementById('reader');
+    r.querySelector('.reader-title').textContent = b.drive.name || b.title;
+    r.querySelector('.reader-open').href = b.drive.open;
+    const frame = r.querySelector('iframe');
+    frame.src = b.drive.preview;
+    frame.title = `Arquivo de ${b.title}`;
+    r.hidden = false;
+    if (!this.reduce) gsap.fromTo(r.querySelector('.reader-sheet'), { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'expo.out' });
+    r.querySelector('.reader-close').focus();
+  }
+
+  closeReader() {
+    const r = document.getElementById('reader');
+    if (r.hidden) return false;
+    r.hidden = true;
+    r.querySelector('iframe').src = 'about:blank';
+    const btn = this.info.querySelector('[data-act="read-file"]');
+    if (btn) btn.focus();
+    return true;
+  }
+
   myLinksHtml(b) {
     const links = b.links || [];
     return `<section class="my-links" aria-labelledby="ml-h">
@@ -207,6 +294,13 @@ export class BookView {
     const url = normalizeUrl(form.elements.url.value);
     if (!url) { err.textContent = 'Esse endereço não parece válido. Cole o link completo, como https://site.com/livro.'; form.elements.url.focus(); return; }
     const b = this.book;
+    const asDrive = parseDrive(url);
+    if (asDrive && !b.drive) {
+      store.updateBook(b.id, { drive: { ...asDrive, name: form.elements.label.value.trim() } }, { drive: true });
+      this.refreshDrive();
+      form.reset();
+      return;
+    }
     if ((b.links || []).some((l) => l.url === url)) { err.textContent = 'Esse link já está salvo neste livro.'; return; }
     const label = form.elements.label.value.trim();
     store.updateBook(b.id, { links: [...(b.links || []), { id: uid(), label, url }] });
@@ -368,6 +462,8 @@ export class BookView {
     else if (act === 'cover') this.toggleCover(el);
     else if (act === 'prev' || act === 'next') this.step(act === 'next' ? 1 : -1);
     else if (act === 'remove') this.remove(el);
+    else if (act === 'read-file') this.openReader();
+    else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null }, { drive: true }); this.refreshDrive(); }
   }
 
   onChange(e) {

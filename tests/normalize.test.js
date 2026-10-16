@@ -86,3 +86,15 @@ test('new sections are suggested from API categories', () => {
   assert.equal(suggestSection({ categories: ['Fiction / Science Fiction / Space Opera'], title: 'x' }, sections), 'sf');
   assert.equal(suggestSection({ categories: ['Fiction / Fantasy / Epic'], title: 'x' }, sections), 'fn');
 });
+
+import { parseDrive } from '../src/lib/util.js';
+test('parseDrive recognises Drive and Docs links', () => {
+  const f = parseDrive('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=sharing');
+  assert.equal(f.kind, 'file');
+  assert.equal(f.preview, 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/preview');
+  assert.equal(parseDrive('drive.google.com/open?id=1AbCdEfGhIjKlMnOp').id, '1AbCdEfGhIjKlMnOp');
+  assert.equal(parseDrive('https://drive.google.com/drive/u/0/folders/1FolderIdXyz123').kind, 'folder');
+  assert.equal(parseDrive('https://docs.google.com/document/d/1DocIdXyz12345/edit').preview, 'https://docs.google.com/document/d/1DocIdXyz12345/preview');
+  assert.equal(parseDrive('https://example.com/file/d/1AbCdEfGhIjKlMnOp'), null);
+  assert.equal(parseDrive('javascript:alert(1)'), null);
+});

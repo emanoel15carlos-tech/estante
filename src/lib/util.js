@@ -80,3 +80,37 @@ export function normalizeUrl(input) {
 }
 
 export const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return url; } };
+
+/**
+ * Recognises Google Drive / Docs links. Returns { kind, id, url, preview, open, label }
+ * or null when the address is not a Drive item.
+ */
+export function parseDrive(input) {
+  const url = normalizeUrl(input);
+  if (!url) return null;
+  let m;
+  const u = new URL(url);
+  const host = u.hostname.replace(/^www\./, '');
+  if (host === 'drive.google.com') {
+    if ((m = u.pathname.match(/\/file\/d\/([\w-]{10,})/))) return driveItem('file', m[1]);
+    if ((m = u.pathname.match(/\/folders\/([\w-]{10,})/))) return driveItem('folder', m[1]);
+    const id = u.searchParams.get('id');
+    if (id && /^[\w-]{10,}$/.test(id)) return driveItem('file', id);
+  }
+  if (host === 'docs.google.com' && (m = u.pathname.match(/\/(document|spreadsheets|presentation)\/d\/([\w-]{10,})/))) {
+    return driveItem(m[1], m[2]);
+  }
+  return null;
+}
+
+function driveItem(kind, id) {
+  const docs = { document: 'document', spreadsheets: 'spreadsheets', presentation: 'presentation' };
+  if (docs[kind]) {
+    const base = `https://docs.google.com/${kind}/d/${id}`;
+    return { kind, id, url: `${base}/edit`, open: `${base}/edit`, preview: `${base}/preview`, label: { document: 'Documento Google', spreadsheets: 'Planilha Google', presentation: 'Apresentação Google' }[kind] };
+  }
+  if (kind === 'folder') {
+    return { kind, id, url: `https://drive.google.com/drive/folders/${id}`, open: `https://drive.google.com/drive/folders/${id}`, preview: `https://drive.google.com/embeddedfolderview?id=${id}#grid`, label: 'Pasta no Drive' };
+  }
+  return { kind: 'file', id, url: `https://drive.google.com/file/d/${id}/view`, open: `https://drive.google.com/file/d/${id}/view`, preview: `https://drive.google.com/file/d/${id}/preview`, label: 'Arquivo no Drive' };
+}

@@ -127,7 +127,7 @@
             <label class="field"><span class="field-label">ISBN</span><input name="isbn" inputmode="numeric"></label>
           </div>
           <label class="field"><span class="field-label">Sinopse</span><textarea name="synopsis" rows="4"></textarea></label>
-          <label class="field"><span class="field-label">Onde encontrar <span class="opt">(opcional)</span></span><input name="link" inputmode="url" placeholder="Cole um link: loja, arquivo, biblioteca…" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Onde encontrar <span class="opt">(opcional)</span></span><input name="link" inputmode="url" placeholder="Cole um link: Google Drive, loja, biblioteca…" autocomplete="off"></label>
           <div class="field-row">
             <label class="field"><span class="field-label">Seção</span><select name="section" class="section-select"></select></label>
             <label class="field"><span class="field-label">Status</span>
@@ -169,6 +169,21 @@
         <button type="submit" class="btn btn-solid">Criar seção</button>
       </form>
     </aside>
+  </div>
+
+  <!-- Drive reader -->
+  <div class="reader" id="reader" hidden>
+    <button type="button" class="scrim" data-close-reader aria-label="Fechar leitor" tabindex="-1"></button>
+    <div class="reader-sheet" role="dialog" aria-modal="true" aria-labelledby="reader-title">
+      <div class="reader-bar">
+        <h2 class="reader-title serif" id="reader-title"></h2>
+        <a class="btn btn-quiet reader-open" href="#" target="_blank" rel="noopener noreferrer">Abrir no Drive</a>
+        <button type="button" class="icon-btn reader-close" data-close-reader aria-label="Fechar leitor">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+      </div>
+      <iframe src="about:blank" title="Arquivo" allow="autoplay" referrerpolicy="no-referrer"></iframe>
+    </div>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

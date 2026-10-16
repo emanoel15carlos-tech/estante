@@ -75,8 +75,8 @@ function renderTabs() {
 function spineHtml(b, section) {
   const cn = store.callNumber(b, section);
   return `<span class="slot${b.id === ui.openId ? ' is-out' : ''}" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
-    <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
-      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>
+    <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}${b.drive ? ', com arquivo no Drive' : ''}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
+      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}
       <span class="callno" aria-hidden="true">${cn.code ? `<span>${esc(cn.code)}</span>` : ''}<span>${esc(cn.cutter)}</span></span>
     </button>
   </span>`;
@@ -201,7 +201,7 @@ document.getElementById('open-sections').addEventListener('click', () => section
 
 store.subscribe((state, meta) => {
   renderLede();
-  if (meta.updated && !meta.moved && !meta.section) {
+  if (meta.updated && !meta.moved && !meta.section && !meta.drive) {
     patchSpine(meta.updated);
     renderTabs();
   } else {

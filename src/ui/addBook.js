@@ -4,7 +4,7 @@ import * as store from '../lib/store.js';
 import { completeBook, searchBooks, SOURCE_LABEL } from '../lib/apis.js';
 import { suggestSection, translateCategory } from '../lib/categories.js';
 import { averageColor, fileToCover, loadCorsImage } from '../lib/covers.js';
-import { cleanIsbn, esc, normalizeUrl, uid } from '../lib/util.js';
+import { cleanIsbn, esc, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
 function sectionOptions(selected) {
   return store.getState().sections
@@ -178,7 +178,7 @@ export class AddBook {
           </label>
         </div>
         <label class="field new-section" hidden><span class="field-label">Nome da nova seção</span><input data-newsection value="${esc(fromApi)}"></label>
-        <label class="field"><span class="field-label">Onde encontrar <span class="opt">(opcional)</span></span><input data-link inputmode="url" placeholder="Cole um link: loja, arquivo, biblioteca…" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Onde encontrar <span class="opt">(opcional)</span></span><input data-link inputmode="url" placeholder="Cole um link: Google Drive, loja, biblioteca…" autocomplete="off"></label>
         <p class="form-error" role="alert"></p>
         <button type="button" class="btn btn-solid btn-wide" data-confirm>Colocar na estante</button>
       </div>`);
@@ -213,7 +213,8 @@ export class AddBook {
       ...colors,
       sectionId,
       status: li.querySelector('[data-status]').value || null,
-      links: link ? [{ id: uid(), label: '', url: link }] : [],
+      links: link && !parseDrive(link) ? [{ id: uid(), label: '', url: link }] : [],
+      drive: link && parseDrive(link) ? { ...parseDrive(link), name: '' } : null,
       coverSource: full.cover ? (full.cover.includes('openlibrary') ? 'openlibrary' : full.cover.includes('google') ? 'google' : full.source) : null,
     });
     this.lastAdded = book.id;
@@ -264,7 +265,8 @@ export class AddBook {
       cover: this.manualCover,
       coverSource: this.manualCover ? 'manual' : null,
       source: 'manual',
-      links: link ? [{ id: uid(), label: '', url: link }] : [],
+      links: link && !parseDrive(link) ? [{ id: uid(), label: '', url: link }] : [],
+      drive: link && parseDrive(link) ? { ...parseDrive(link), name: '' } : null,
       ...colors,
     });
     this.lastAdded = book.id;
