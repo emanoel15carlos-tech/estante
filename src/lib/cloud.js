@@ -13,7 +13,7 @@ const ANON = (import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || 'eyJ
 // Always private: personal links and the Drive file. Reading status and page are shared
 // unless the reader turns that off; each review says whether it is published.
 export const PRIVATE_FIELDS = ['links', 'drive'];
-export const READING_FIELDS = ['status', 'progress'];
+export const READING_FIELDS = ['status', 'progress', 'history', 'finishedAt'];
 const OWNER_KEY = 'estante:owner';
 const DIRTY_KEY = 'estante:dirty';
 
@@ -72,7 +72,7 @@ export function splitState(state) {
       books,
       reviews: reviews.slice(0, 200),
       reading,
-      done: share ? state.books.filter((b) => b.status === 'lido').map(bookKey).slice(0, 1000) : [],
+      done: share ? state.books.filter((b) => b.status === 'lido').map((b) => ({ k: bookKey(b), at: b.finishedAt || null })).slice(0, 1000) : [],
       summary: {
         stats: share ? stats : null,
         count: books.length,
@@ -232,7 +232,11 @@ export async function loadFeed({ fresh = false } = {}) {
     if (!p) continue;
     (s.reviews || []).forEach((r) => reviews.push({ ...r, who: p }));
     (s.reading || []).forEach((r) => reading.push({ ...r, who: p }));
-    (s.done || []).forEach((k) => { if (!done.has(k)) done.set(k, []); done.get(k).push(p); });
+    (s.done || []).forEach((d) => {
+      const k = typeof d === 'string' ? d : d.k;
+      if (!done.has(k)) done.set(k, []);
+      done.get(k).push({ who: p, at: typeof d === 'string' ? null : d.at });
+    });
     if (s.stats) stats.push({ ...s.stats, who: p });
   }
   reviews.sort((x, y) => String(y.at).localeCompare(String(x.at)));

@@ -117,6 +117,7 @@ export class BookView {
         <div><div class="t">${esc(b.title)}</div><div class="a">${esc((b.authors || []).join(', '))}${b.year ? ', ' + esc(b.year) : ''}</div></div>
         <div class="s" data-status-text>${esc(b.status ? STATUS_TEXT[b.status] : 'Na estante')}</div>
       </div>
+      ${b.status === 'lendo' ? `<div class="b3-ribbon" aria-hidden="true" style="--len:${Math.round(14 + Math.min(100, ((b.progress || {}).page || 0) / Math.max(1, (b.progress || {}).total || b.pageCount || 1) * 100) * 0.5)}px"></div>` : ''}
       <div class="cover">
         <div class="cv-front">${this.coverHtml(b)}</div>
         <div class="cv-in"></div>
@@ -126,6 +127,7 @@ export class BookView {
   }
 
   renderInfo(b) {
+    if (this.pocketFor !== b.id) { this.pocketHouse = []; this.pocketFor = b.id; }
     const sections = store.getState().sections;
     const section = sections.find((s) => s.id === b.sectionId);
     const src = b.source && SOURCE_LABEL[b.source];
@@ -165,6 +167,7 @@ export class BookView {
           <button type="button" class="btn btn-danger" data-act="remove">${this.confirmRemove ? 'Confirmar remoção' : 'Remover'}</button>
         </div>
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
+        ${this.pocketHtml(b, cn)}
       </div>
       ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
@@ -240,6 +243,62 @@ export class BookView {
     const slot = this.info.querySelector('.bookmark-slot');
     if (!slot) return;
     slot.insertAdjacentHTML('beforeend', `<p class="bm-done" role="status">${esc(text)}</p>`);
+  }
+
+  /* ---------------- loan card in the book's pocket ---------------- */
+
+  pocketRows(b) {
+    const owner = store.visiting();
+    const me = cloud.currentProfile();
+    const who = owner ? owner.display_name : (me ? me.display_name : 'Você');
+    const rows = [];
+    if (b.addedAt) rows.push({ at: new Date(b.addedAt).toISOString(), who, what: 'catalogou' });
+    let finishes = 0;
+    const hist = (b.history && b.history.length) ? b.history : (b.finishedAt ? [{ t: 'finish', at: b.finishedAt }] : []);
+    hist.forEach((h) => {
+      if (h.t === 'finish') finishes++;
+      rows.push({ at: h.at, who, what: h.t === 'start' ? (finishes ? 'começou a reler' : 'começou') : finishes > 1 ? 'releu' : 'terminou', done: h.t === 'finish' });
+    });
+    return rows.concat(this.pocketHouse || []).sort((x, y) => String(x.at || '9').localeCompare(String(y.at || '9')));
+  }
+
+  pocketBody(b) {
+    const rows = this.pocketRows(b);
+    if (!rows.length) return '<tr><td colspan="3" class="pc-empty">Nenhum carimbo ainda. Marque Lendo ou Lido e a ficha ganha a primeira data.</td></tr>';
+    const stampDate = (iso) => (iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/\./g, '').replace(/ de /g, ' ').toUpperCase() : '—');
+    return rows.map((r, i) => `<tr${r.house ? ' class="is-house"' : ''}>
+      <td class="pc-date"><span style="--r:${((i * 47) % 7) - 3}deg">${esc(stampDate(r.at))}</span></td>
+      <td class="pc-who">${esc(r.who)} <span>${esc(r.what)}</span></td>
+      <td class="pc-mark"><span class="pc-ini${r.done ? ' is-done' : ''}" style="--r:${((i * 29) % 11) - 5}deg">${esc(String(r.who || '?').trim()[0] || '?').toUpperCase()}</span></td>
+    </tr>`).join('');
+  }
+
+  pocketHtml(b, cn) {
+    return `<div class="pocket${this.pocketOpen ? ' is-open' : ''}">
+      <button type="button" class="pocket-pull" data-act="pocket" aria-expanded="${!!this.pocketOpen}">${this.pocketOpen ? 'Guardar a ficha' : 'Puxar a ficha de leitura'}</button>
+      <div class="pocket-card" id="pocket-card">
+        <p class="pc-head"><span>${esc([cn.code, cn.cutter].filter(Boolean).join(' '))}</span><span>Ficha de leitura</span></p>
+        <p class="pc-title">${esc(b.title)}</p>
+        <table class="pc-table"><thead><tr><th scope="col">Data</th><th scope="col">Leitor</th><th scope="col"><span class="sr">Carimbo</span></th></tr></thead>
+        <tbody data-pocket-body>${this.pocketBody(b)}</tbody></table>
+      </div>
+      <div class="pocket-sleeve" aria-hidden="true"><span>Estante · biblioteca particular</span><span class="ps-rule"></span><span>Devolva o livro à sua prateleira</span></div>
+    </div>`;
+  }
+
+  renderPocket() {
+    const body = this.info.querySelector('[data-pocket-body]');
+    if (body && this.book) body.innerHTML = this.pocketBody(this.book);
+  }
+
+  togglePocket(btn) {
+    this.pocketOpen = !this.pocketOpen;
+    const pocket = btn.closest('.pocket');
+    pocket.classList.toggle('is-open', this.pocketOpen);
+    btn.setAttribute('aria-expanded', String(this.pocketOpen));
+    btn.textContent = this.pocketOpen ? 'Guardar a ficha' : 'Puxar a ficha de leitura';
+    const card = pocket.querySelector('.pocket-card');
+    if (!this.reduce) gsap.fromTo(card, { y: this.pocketOpen ? 30 : -10 }, { y: 0, duration: 0.55, ease: this.pocketOpen ? 'back.out(1.6)' : 'power3.out' });
   }
 
   /* ---------------- reviews ---------------- */
@@ -392,6 +451,12 @@ export class BookView {
     const owner = store.visiting();
     const others = feed.reviews.filter((r) => r.key === key && r.who.id !== me.id && !(owner && r.who.id === owner.id));
     const readingNow = feed.reading.filter((r) => r.key === key && r.who.id !== me.id);
+    const ownerId = owner ? owner.id : me.id;
+    this.pocketHouse = [
+      ...(feed.done.get(key) || []).filter((d) => d.who.id !== ownerId).map((d) => ({ at: d.at, who: d.who.display_name, what: 'leu', done: true, house: true })),
+      ...feed.reading.filter((r) => r.key === key && r.who.id !== ownerId).map((r) => ({ at: r.at, who: r.who.display_name, what: r.page ? `está na pág. ${r.page}` : 'está lendo', house: true })),
+    ];
+    this.renderPocket();
     slot.innerHTML = (readingNow.length ? `<p class="bv-text house-reading">${readingNow.map((r) => `<strong>${esc(r.who.display_name)}</strong>${r.page ? ` está na página ${nf.format(r.page)}${r.total ? ` de ${nf.format(r.total)}` : ''}` : ' está lendo'}`).join(' · ')}.</p>` : '')
       + (others.length ? `<h3 class="bv-h">Dos leitores da casa</h3><ul class="reviews">${others.map((r) => this.reviewCard(r, r.who)).join('')}</ul>` : '');
     social.hydrate(this.panel('resenhas'));
@@ -412,6 +477,7 @@ export class BookView {
     const st = this.book3d.querySelector('[data-status-text]');
     if (st) st.textContent = next ? STATUS_TEXT[next] : 'Na estante';
     this.renderProgress();
+    this.renderPocket();
   }
 
   panel(id) { return this.info.querySelector('#bvp-' + id); }
@@ -765,6 +831,7 @@ export class BookView {
     else if (act === 'start-reading') { store.updateBook(this.id, { status: 'lendo' }); this.setStatusUi('lendo'); const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
     else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null, driveShared: false }, { drive: true }); this.refreshDrive(); }
     else if (act === 'propose') this.showPropose();
+    else if (act === 'pocket') this.togglePocket(el);
     else if (act === 'propose-cancel') this.renderClub();
   }
 
@@ -901,7 +968,7 @@ export class BookView {
     this.busy = true;
     const r = this.reduce;
     if (this.floatT) this.floatT.kill();
-    const slot = document.querySelector(`.slot[data-book="${CSS.escape(this.id)}"] .spine`);
+    const slot = document.querySelector(`#corner:not([hidden]) [data-desk="${CSS.escape(this.id)}"]`) || document.querySelector(`.slot[data-book="${CSS.escape(this.id)}"] .spine`);
     const rect = slot ? slot.getBoundingClientRect() : null;
     const visible = rect && rect.width > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
     const tl = gsap.timeline({ onComplete: () => this.hide() });

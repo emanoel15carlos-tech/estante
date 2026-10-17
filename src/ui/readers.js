@@ -379,12 +379,12 @@ export class Readers {
       const readingNow = feed.reading.filter((r) => r.key === bk.key);
       const finished = feed.done.get(bk.key) || [];
       const mineOnShelf = store.isReadOnly() ? null : store.getState().books.find((b) => cloud.bookKey(b) === bk.key);
-      const amIn = readingNow.some((r) => r.who.id === me.id) || finished.some((p) => p.id === me.id);
+      const amIn = readingNow.some((r) => r.who.id === me.id) || finished.some((f) => f.who.id === me.id);
       const by = feed.people.find((p) => p.id === h.created_by);
       const canClose = h.created_by === me.id || me.is_admin;
       const people = [
         ...readingNow.map((r) => `<li><span class="mono sm" aria-hidden="true">${esc(initial(r.who.display_name))}</span>${esc(name(r.who))}<span class="club-p">${r.total ? `${Math.min(100, Math.round((r.page / r.total) * 100))}%` : r.page ? `pág. ${r.page}` : 'começou'}</span>${r.total ? `<span class="bm-bar"><span style="width:${Math.min(100, Math.round((r.page / r.total) * 100))}%"></span></span>` : ''}</li>`),
-        ...finished.map((p) => `<li><span class="mono sm" aria-hidden="true">${esc(initial(p.display_name))}</span>${esc(name(p))}<span class="club-p is-done">terminou</span></li>`),
+        ...finished.map(({ who: p }) => `<li><span class="mono sm" aria-hidden="true">${esc(initial(p.display_name))}</span>${esc(name(p))}<span class="club-p is-done">terminou</span></li>`),
       ].join('');
       return `<article class="club">
         ${thumb(bk)}

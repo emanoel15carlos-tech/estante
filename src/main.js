@@ -100,6 +100,12 @@ function renderStatusFilter() {
 
 function spineHtml(b, section) {
   const cn = store.callNumber(b, section);
+  if (awayFromShelf(b)) {
+    const where = b.status === 'lendo' ? 'Na mesa' : 'Na cabeceira';
+    return `<span class="slot slot-away" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
+      <button type="button" class="slip" data-slip aria-label="${esc(b.title)}: ${where.toLowerCase()}" title="${esc(b.title)} · ${where}"><span>${where}</span><span class="slip-cn">${esc(cn.cutter)}</span></button>
+    </span>`;
+  }
   return `<span class="slot${b.id === ui.openId ? ' is-out' : ''}" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
     <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}${b.drive ? ', com arquivo no Drive' : ''}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
       <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${progressBar(b)}${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}
@@ -108,11 +114,77 @@ function spineHtml(b, section) {
   </span>`;
 }
 
-function progressBar(b) {
+const pct = (b) => {
   const pr = b.progress;
   const total = (pr && pr.total) || b.pageCount;
-  if (b.status !== 'lendo' || !pr || !pr.page || !total) return '';
-  return `<span class="spine-progress" aria-hidden="true"><span style="height:${Math.min(100, Math.round((pr.page / total) * 100))}%"></span></span>`;
+  return pr && pr.page && total ? Math.min(100, Math.round((pr.page / total) * 100)) : 0;
+};
+
+// The bookmark ribbon: the further you read, the longer the satin tail.
+function ribbon(b, max = 46) {
+  if (b.status !== 'lendo') return '';
+  const p = pct(b);
+  return `<span class="ribbon" aria-hidden="true" style="--len:${Math.round(8 + (p / 100) * max)}px"></span>`;
+}
+const progressBar = (b) => ribbon(b);
+
+/* ---------------- the reading corner: desk (lendo) and bedside pile (quero ler) ---------------- */
+const $corner = document.getElementById('corner');
+const cornerOn = () => ui.status === 'todos' && !ui.q;
+const awayFromShelf = (b) => cornerOn() && (b.status === 'lendo' || b.status === 'quero');
+
+function deskBook(b) {
+  const pr = b.progress || {};
+  const total = pr.total || b.pageCount || 0;
+  const p = pct(b);
+  const cover = b.cover ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  return `<button type="button" class="open-book" data-desk="${esc(b.id)}" aria-label="${esc(b.title)}, aberto na página ${pr.page || 0}${total ? ` de ${total}` : ''}" style="--c:${b.color};--i:${b.ink}">
+    <span class="ob-page ob-left"><span class="ob-thumb" style="background:${b.color}">${cover}</span><span class="ob-title">${esc(b.title)}</span><span class="ob-author">${esc((b.authors || [])[0] || '')}</span></span>
+    <span class="ob-page ob-right"><span class="ob-lines" aria-hidden="true"></span><span class="ob-folio">${pr.page ? `p. ${pr.page}` : 'p. 1'}</span></span>
+    <span class="ob-ribbon" aria-hidden="true" style="--len:${Math.round(14 + (p / 100) * 54)}px"></span>
+    <span class="ob-pct">${total ? `${p}%` : 'marque a página'}</span>
+  </button>`;
+}
+
+function pileBook(b, i) {
+  const w = Math.max(150, Math.min(230, 150 + ((b.pageCount || 300) / 900) * 80));
+  const h = Math.max(20, Math.min(34, 16 + ((b.pageCount || 300) / 60)));
+  const tilt = ((i * 37) % 7) - 3;
+  return `<button type="button" class="pile-book" data-desk="${esc(b.id)}" aria-label="${esc(b.title)}, na pilha de quero ler" style="--w:${w}px;--h:${h}px;--t:${tilt}deg;--x:${((i * 53) % 21) - 10}px;background:${b.color};color:${b.ink}">
+    <span>${esc(b.title)}</span>
+  </button>`;
+}
+
+function renderCorner() {
+  const { books } = store.getState();
+  const inCat = (b) => ui.cat === 'todas' || b.sectionId === ui.cat;
+  const reading = books.filter((b) => b.status === 'lendo' && inCat(b)).sort((x, y) => String((y.progress || {}).at || '').localeCompare(String((x.progress || {}).at || '')));
+  const want = books.filter((b) => b.status === 'quero' && inCat(b));
+  const show = cornerOn() && (reading.length || want.length || !store.isReadOnly());
+  $corner.hidden = !show;
+  if (!show) { $corner.innerHTML = ''; return; }
+  const who = store.visiting();
+  const pile = want.slice(0, 9);
+  $corner.innerHTML = `
+    <div class="desk-area">
+      <h2 class="corner-h serif">Mesa de leitura</h2>
+      <div class="desk">
+        <span class="lamp" aria-hidden="true"><span class="lamp-shade"></span><span class="lamp-arm"></span><span class="lamp-base"></span></span>
+        <div class="desk-books">${reading.length ? reading.map(deskBook).join('') : `<p class="desk-empty">${who ? `${esc(who.display_name)} não está lendo nada agora.` : 'Nenhum livro aberto. Marque um livro como <strong>Lendo</strong> e ele vem para a mesa.'}</p>`}</div>
+        <span class="desk-top" aria-hidden="true"></span>
+      </div>
+    </div>
+    <div class="pile-area">
+      <h2 class="corner-h serif">Pilha de cabeceira</h2>
+      <div class="pile">
+        ${want.length > pile.length ? `<span class="pile-more">+${want.length - pile.length}</span>` : ''}
+        <div class="pile-stack">${pile.length ? pile.map(pileBook).reverse().join('') : ''}</div>
+        ${pile.length ? '' : `<p class="desk-empty">${who ? 'A pilha está vazia.' : 'Os livros marcados como <strong>Quero ler</strong> se empilham aqui.'}</p>`}
+        <span class="nightstand" aria-hidden="true"></span>
+      </div>
+      ${want.length ? `<button type="button" class="link-btn" data-status-filter="quero">Ver os ${want.length} da pilha</button>` : ''}
+    </div>`;
+  if (ui.openId) $corner.querySelector(`[data-desk="${CSS.escape(ui.openId)}"]`)?.classList.add('is-out');
 }
 
 function shelfIds() {
@@ -121,6 +193,7 @@ function shelfIds() {
 }
 
 function renderShelves({ flip = true } = {}) {
+  renderCorner();
   const state = flip && !reduce && $shelves.children.length ? Flip.getState($shelves.querySelectorAll('.slot')) : null;
   const { sections } = store.getState();
   const books = visibleBooks();
@@ -173,7 +246,7 @@ function patchSpine(id) {
   el.style.background = b.color;
   el.style.color = b.ink;
   el.classList.toggle('is-read', b.status === 'lido');
-  el.querySelector('.spine-progress')?.remove();
+  el.querySelector('.spine-progress, .ribbon')?.remove();
   const bar = progressBar(b);
   if (bar) el.querySelector('.read-dot').insertAdjacentHTML('afterend', bar);
 }
@@ -232,7 +305,9 @@ const view = new BookView({
     ui.openId = id;
     if (prev) $shelves.querySelector(`.slot[data-book="${CSS.escape(prev)}"]`)?.classList.remove('is-out');
     if (id) $shelves.querySelector(`.slot[data-book="${CSS.escape(id)}"]`)?.classList.add('is-out');
-    if (!id && ui.status !== 'todos') setTimeout(() => { if (!ui.openId) renderShelves(); }, 900);
+    if (prev) $corner.querySelector(`[data-desk="${CSS.escape(prev)}"]`)?.classList.remove('is-out');
+    if (id) $corner.querySelector(`[data-desk="${CSS.escape(id)}"]`)?.classList.add('is-out');
+    if (!id && (ui.status !== 'todos' || shelvesStale)) setTimeout(() => { if (!ui.openId) { shelvesStale = false; renderShelves(); } }, 900);
   },
 });
 
@@ -247,6 +322,7 @@ const add = new AddBook({
   },
 });
 
+let shelvesStale = false;
 const $visitBar = document.getElementById('visit-bar');
 function setVisiting(p) {
   document.body.classList.toggle('is-visiting', !!p);
@@ -324,6 +400,15 @@ store.subscribe((state, meta) => {
   if (meta.updated && !meta.moved && !meta.section && !meta.drive && ui.status === 'todos') {
     patchSpine(meta.updated);
     renderTabs();
+    clearTimeout(renderCorner.t);
+    renderCorner.t = setTimeout(() => {
+      renderCorner();
+      // the book left the shelf for the desk or the pile (or came back): redraw the shelves when it is closed
+      const b = store.getState().books.find((x) => x.id === meta.updated);
+      const slot = $shelves.querySelector(`.slot[data-book="${CSS.escape(meta.updated)}"]`);
+      if (b && slot && slot.classList.contains('slot-away') !== awayFromShelf(b)) shelvesStale = true;
+      if (shelvesStale && !ui.openId) { shelvesStale = false; renderShelves(); }
+    }, 60);
   } else if (meta.updated && !meta.moved && !meta.section && !meta.drive) {
     // A filtered shelf may lose or gain this book; keep the open book's slot in place.
     patchSpine(meta.updated);
@@ -356,7 +441,26 @@ $tabs.addEventListener('click', (e) => {
   renderShelves();
 });
 
+$corner.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-desk]');
+  if (el) {
+    const r = el.getBoundingClientRect();
+    view.open(el.dataset.desk, { left: r.left + r.width / 2 - 20, top: r.top, width: 40, height: r.height }, { returnFocus: el });
+    return;
+  }
+  const sf = e.target.closest('[data-status-filter]');
+  if (sf) setStatusFilter(sf.dataset.statusFilter);
+});
+
 $shelves.addEventListener('click', (e) => {
+  const slip = e.target.closest('[data-slip]');
+  if (slip) {
+    const id = slip.closest('.slot').dataset.book;
+    const desk = $corner.querySelector(`[data-desk="${CSS.escape(id)}"]`);
+    if (desk) { desk.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' }); setTimeout(() => desk.click(), reduce ? 0 : 450); }
+    else { const r = slip.getBoundingClientRect(); view.open(id, { left: r.left, top: r.top, width: r.width, height: r.height }, { returnFocus: slip }); }
+    return;
+  }
   const spine = e.target.closest('.spine');
   if (spine) {
     const id = spine.closest('.slot').dataset.book;

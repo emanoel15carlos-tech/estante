@@ -379,8 +379,18 @@ export function updateBook(id, patch, meta = {}) {
   if (!book) return;
   const next = { ...patch };
   // Remember when a book was finished, for the year's reading goal.
-  if (next.status === 'lido' && book.status !== 'lido') next.finishedAt = new Date().toISOString();
+  const nowIso = new Date().toISOString();
+  if (next.status === 'lido' && book.status !== 'lido') next.finishedAt = nowIso;
   if (next.status !== undefined && next.status !== 'lido' && book.finishedAt) next.finishedAt = null;
+  // The loan card in the book's pocket: every start and finish gets a stamp.
+  if (next.status !== undefined && next.status !== book.status && (next.status === 'lendo' || next.status === 'lido')) {
+    const t = next.status === 'lendo' ? 'start' : 'finish';
+    const hist = (book.history || []).slice();
+    const last = hist[hist.length - 1];
+    if (last && last.t === t && Date.now() - Date.parse(last.at) < 6e4) hist.pop(); // undo of a quick misclick
+    hist.push({ t, at: nowIso });
+    next.history = hist.slice(-40);
+  }
   let pageLog = state.pageLog;
   if (meta.pages > 0) {
     const k = monthKey();
