@@ -941,3 +941,24 @@ button.reader-card:hover .rc-go, button.reader-card:focus-visible .rc-go { opaci
 .ob-ribbon { left: 80%; }
 .ob-folio { align-self: flex-start; }
 @media (max-width: 860px) { .pile { min-height: 250px; } }
+
+/* ---------- Casas (in the reader's profile) ---------- */
+.houses { display: grid; gap: 12px; }
+.house-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; }
+.house { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-top: 5px solid var(--case); border-radius: 3px; background: var(--paper-2); }
+.house-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.house h4 { margin: 2px 0 0; font-size: 22px; font-weight: 400; color: var(--ink); }
+.house-n { font: 12px var(--type); color: var(--ink-3); white-space: nowrap; }
+.house-people { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.house-people li { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; color: var(--ink); }
+.house-people .link-btn { margin-left: 6px; font-size: 12px; }
+.house-tag { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--card-red); border-radius: 999px; font: 700 10px var(--type); letter-spacing: .08em; text-transform: uppercase; color: var(--card-red); }
+.house .invite-row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.house .invite-code { font-size: 15px; }
+.house-foot { display: flex; gap: 16px; }
+.link-btn.danger { color: var(--danger); }
+.house-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.house-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: end; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 3px; }
+.house-form .form-error { grid-column: 1 / -1; margin: 0; }
+.house-rename { display: flex; gap: 8px; align-items: center; }
+.house-rename input { min-height: 36px; font-size: 16px; }

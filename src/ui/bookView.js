@@ -380,9 +380,15 @@ export class BookView {
     const slot = this.info.querySelector('.club-slot');
     if (!slot) return;
     const d = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+    const hs = cloud.myHouses();
+    if (!hs.length) {
+      slot.innerHTML = '<p class="bm-done">Para ler junto, entre numa casa ou crie a sua em Leitores › Casas.</p>';
+      return;
+    }
     slot.innerHTML = `<form class="propose" data-propose-form novalidate>
       <h3 class="bv-h">Leitura da casa</h3>
-      <p class="small">Todos os leitores veem a proposta no Mural e podem entrar na leitura.</p>
+      <p class="small">Os moradores veem a proposta no Mural e podem entrar na leitura.</p>
+      ${hs.length > 1 ? `<label class="field"><span class="field-label">Para qual casa</span><select name="house">${hs.map((h) => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join('')}</select></label>` : `<input type="hidden" name="house" value="${esc(hs[0].id)}">`}
       <label class="field"><span class="field-label">Ler até</span><input type="date" name="ends_on" value="${d}" min="${new Date().toISOString().slice(0, 10)}"></label>
       <label class="field"><span class="field-label">Recado para a casa <span class="opt">(opcional)</span></span><textarea name="note" rows="2" maxlength="500" placeholder="Por que vale ler juntos?"></textarea></label>
       <p class="form-error" role="alert"></p>
@@ -395,7 +401,7 @@ export class BookView {
     const btn = form.querySelector('[type="submit"]');
     btn.disabled = true;
     try {
-      await cloud.proposeHouseRead(this.book, { note: form.elements.note.value.trim(), ends_on: form.elements.ends_on.value || null });
+      await cloud.proposeHouseRead(this.book, { note: form.elements.note.value.trim(), ends_on: form.elements.ends_on.value || null, house_id: form.elements.house.value });
       const b = this.book;
       if (b.status !== 'lendo' && b.status !== 'lido') { store.updateBook(b.id, { status: 'lendo' }); this.setStatusUi('lendo'); }
       this.renderClub();

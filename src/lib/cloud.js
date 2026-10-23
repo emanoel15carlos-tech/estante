@@ -144,15 +144,11 @@ export async function signOut() {
 
 export const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
-const PROFILE_COLS = 'id, username, display_name, is_admin';
+const PROFILE_COLS = 'id, username, display_name';
 
 export async function loadProfile() {
   if (!user) return null;
-  let { data, error } = await sb.from('profiles').select(PROFILE_COLS).eq('id', user.id).maybeSingle();
-  if (error && /is_admin/.test(error.message || '')) {
-    // Database without part 2 of the setup yet.
-    ({ data, error } = await sb.from('profiles').select('id, username, display_name').eq('id', user.id).maybeSingle());
-  }
+  const { data, error } = await sb.from('profiles').select(PROFILE_COLS).eq('id', user.id).maybeSingle();
   if (error) throw error;
   profile = data;
   return data;
@@ -162,21 +158,18 @@ function profileError(error) {
   const m = (error && error.message) || '';
   if (error && error.code === '23505') return new Error('Esse @usuário já está em uso. Escolha outro.');
   if (error && error.code === '23514') return new Error('O @usuário deve ter de 3 a 20 letras minúsculas, números ou _.');
-  if (/invite_invalid/.test(m)) return Object.assign(new Error('Código de convite não confere. Peça o código a quem te chamou para a Estante.'), { invite: true });
+  if (error && (error.code === '42501' || /permission|row-level/i.test(m))) return new Error('O cadastro está fechado no servidor. Falta rodar a parte 3 da configuração do Supabase.');
   return error;
 }
 
-/** Opens the reader's card. Needs the house invite code, except for the very first reader. */
-export async function saveProfile({ username, display_name, code }) {
-  let { data, error } = await sb.rpc('join_house', { code: code || '', uname: username.toLowerCase(), dname: display_name.trim() });
-  if (error && /join_house/.test(error.message || '') && /find|exist/i.test(error.message || '')) {
-    // Database without part 2 of the setup: fall back to the open sign-up.
-    ({ data, error } = await sb.from('profiles').upsert({ id: user.id, username: username.toLowerCase(), display_name: display_name.trim() }).select('id, username, display_name').single());
-  }
+/** Opens the reader's card. Anyone with an account can; houses come later, from the profile. */
+export async function saveProfile({ username, display_name }) {
+  const { data, error } = await sb.from('profiles').insert({ id: user.id, username: username.toLowerCase(), display_name: display_name.trim() }).select(PROFILE_COLS).single();
   if (error) throw profileError(error);
   profile = data;
   emit('profile');
   if (!syncing) await startSync();
+  await joinPendingInvite();
   return data;
 }
 
@@ -187,19 +180,75 @@ export async function renameProfile(display_name) {
   emit('profile');
 }
 
-export async function getInvite() {
-  const { data, error } = await sb.rpc('get_invite');
-  if (error) throw error;
-  return data;
+/* ---------------- houses ---------------- */
+
+let houses = null; // [{ id, name, owner_id, invite_code, role, members: [{ user_id, role, profile }] }]
+export const myHouses = () => houses || [];
+const PENDING_KEY = 'estante:invite';
+
+function houseError(error) {
+  const m = (error && error.message) || '';
+  if (/invite_invalid/.test(m)) return new Error('Esse código não abre nenhuma casa. Confira com quem te convidou.');
+  if (/owner_cannot_leave/.test(m)) return new Error('Quem criou a casa não pode sair dela. Você pode apagar a casa.');
+  if (/not_owner/.test(m)) return new Error('Só quem criou a casa pode fazer isso.');
+  if (/houses|house_members|create_house|enter_house/.test(m) && /exist|find|schema/i.test(m)) return Object.assign(new Error('Falta rodar a parte 3 da configuração do Supabase.'), { setup: true });
+  return error;
 }
 
-export async function setInvite(code) {
-  const { data, error } = await sb.rpc('set_invite', { code });
-  if (error) {
-    if (/invite_short/.test(error.message || '')) throw new Error('Use pelo menos 6 caracteres.');
-    throw error;
+export async function loadHouses() {
+  if (!user || !profile) { houses = []; return houses; }
+  const { data: mine, error } = await sb.from('house_members').select('role, house:houses(id, name, owner_id, invite_code, created_at)').eq('user_id', user.id);
+  if (error) { houses = []; throw houseError(error); }
+  const list = (mine || []).filter((r) => r.house).map((r) => ({ ...r.house, role: r.role, members: [] }));
+  if (list.length) {
+    const ids = list.map((h) => h.id);
+    const [{ data: members }, { data: people }] = await Promise.all([
+      sb.from('house_members').select('house_id, user_id, role, joined_at').in('house_id', ids).order('joined_at'),
+      sb.from('profiles').select('id, username, display_name'),
+    ]);
+    const who = new Map((people || []).map((p) => [p.id, p]));
+    for (const m of members || []) {
+      const h = list.find((x) => x.id === m.house_id);
+      if (h) h.members.push({ ...m, profile: who.get(m.user_id) || null });
+    }
   }
+  list.sort((a, b) => (a.owner_id === user.id ? -1 : 0) - (b.owner_id === user.id ? -1 : 0) || String(a.created_at).localeCompare(String(b.created_at)));
+  houses = list;
+  return houses;
+}
+
+async function houseRpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw houseError(error);
+  feedCache = null;
+  social = null;
+  await loadHouses().catch(() => {});
+  emit('houses');
   return data;
+}
+export const createHouse = (name) => houseRpc('create_house', { hname: name });
+export const enterHouse = (code) => houseRpc('enter_house', { code: String(code || '').trim() });
+export const leaveHouse = (id) => houseRpc('leave_house', { h: id });
+export const renewInvite = (id) => houseRpc('renew_invite', { h: id });
+export const renameHouse = (id, name) => houseRpc('rename_house', { h: id, hname: name });
+export const removeMember = (id, member) => houseRpc('remove_member', { h: id, member });
+export const deleteHouse = (id) => houseRpc('delete_house', { h: id });
+
+/** An invite link opened before the account existed is kept until the reader's card is open. */
+export function rememberInvite(code) { ls.set(PENDING_KEY, code); }
+export const pendingInvite = () => ls.get(PENDING_KEY);
+export async function joinPendingInvite() {
+  const code = ls.get(PENDING_KEY);
+  if (!code || !profile) return null;
+  ls.set(PENDING_KEY, null);
+  try {
+    const h = await enterHouse(code);
+    emit('joined', h);
+    return h;
+  } catch (e) {
+    emit('join-failed', e);
+    return null;
+  }
 }
 
 export async function listReaders() {
@@ -306,14 +355,14 @@ export async function removeComment(owner, rid, id) {
 /* ---------------- leitura da casa ---------------- */
 
 export async function loadHouseReads() {
-  const { data, error } = await sb.from('house_reads').select('id, book, note, ends_on, created_by, created_at, closed').eq('closed', false).order('created_at', { ascending: false });
+  const { data, error } = await sb.from('house_reads').select('id, house_id, book, note, ends_on, created_by, created_at, closed').eq('closed', false).order('created_at', { ascending: false });
   if (error) return null; // part 2 of the setup not applied yet
   return data || [];
 }
 
-export async function proposeHouseRead(book, { note, ends_on }) {
+export async function proposeHouseRead(book, { note, ends_on, house_id }) {
   const payload = { key: bookKey(book), title: book.title, authors: (book.authors || []).slice(0, 3), cover: plainCover(book.cover), color: book.color, ink: book.ink, year: book.year || '', pageCount: book.pageCount || (book.progress && book.progress.total) || 0, synopsis: (book.synopsis || '').slice(0, 600), isbn: book.isbn || '' };
-  const { data, error } = await sb.from('house_reads').insert({ book: payload, note: note || null, ends_on: ends_on || null, created_by: user.id }).select().single();
+  const { data, error } = await sb.from('house_reads').insert({ book: payload, note: note || null, ends_on: ends_on || null, created_by: user.id, house_id: house_id || (myHouses()[0] && myHouses()[0].id) || null }).select().single();
   if (error) throw error;
   return data;
 }
@@ -536,6 +585,7 @@ async function handleAuth(event, session) {
     baseAt = 0;
     if (startChoice) { startChoice.resolve('seed'); startChoice = null; }
     profile = null;
+    houses = null;
     if (wasSyncing && ls.get(OWNER_KEY)) {
       // Leaving the account: don't keep someone's private links in a shared browser.
       ls.set(OWNER_KEY, null);
@@ -551,12 +601,13 @@ async function handleAuth(event, session) {
     if (!profile) {
       const m = user.user_metadata || {};
       if (m.username && USERNAME_RE.test(m.username) && m.display_name) {
-        try { await saveProfile({ username: m.username, display_name: m.display_name, code: m.invite || '' }); } catch (e) { /* name taken or wrong code: ask */ }
+        try { await saveProfile({ username: m.username, display_name: m.display_name }); } catch (e) { /* name taken: ask */ }
       }
     }
   } catch (e) {
     setStatus('error', e);
   }
+  if (profile) await loadHouses().catch(() => {});
   emit('signed-in');
-  if (profile) await startSync();
+  if (profile) { await startSync(); await joinPendingInvite(); }
 }
