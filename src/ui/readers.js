@@ -59,6 +59,11 @@ export class Readers {
     this.body.addEventListener('click', (e) => this.onClick(e));
     social.bind(this.body, (t) => this.toast(t));
     this.body.addEventListener('change', (e) => {
+      if (e.target.matches('[data-share-links]')) {
+        store.setSettings({ shareLinks: e.target.checked });
+        this.toast(e.target.checked ? 'Quem mora com você vê seus links e arquivos.' : 'Seus links e arquivos agora ficam só com você.');
+        return;
+      }
       if (!e.target.matches('[data-share]')) return;
       store.setSettings({ shareReading: e.target.checked });
       this.toast(e.target.checked ? 'Os leitores da casa veem o que você está lendo.' : 'Seu status e página agora ficam só com você.');
@@ -263,6 +268,7 @@ export class Readers {
           <p class="rc-sync" data-sync></p>
         </div>
         <label class="check rc-share"><input type="checkbox" data-share ${store.settings().shareReading ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar aos leitores o que estou lendo, o que já li e em que página estou</span></label>
+        <label class="check rc-share"><input type="checkbox" data-share-links ${store.settings().shareLinks !== false ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar a quem mora comigo os meus links e arquivos do Drive (dá para esconder livro por livro)</span></label>
         <div class="rc-actions">
           <button type="button" class="btn" data-act="copy">Copiar link da minha estante</button>
           <button type="button" class="link-btn" data-act="signout">Sair</button>

@@ -962,3 +962,17 @@ button.reader-card:hover .rc-go, button.reader-card:focus-visible .rc-go { opaci
 .house-form .form-error { grid-column: 1 / -1; margin: 0; }
 .house-rename { display: flex; gap: 8px; align-items: center; }
 .house-rename input { min-height: 36px; font-size: 16px; }
+
+/* ---------- Links and files shared in the house ---------- */
+.share-note { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #3d6797; background: var(--paper-2); font-size: 13px; color: var(--ink-2); }
+.shared-box { border-color: #3d6797; }
+.shared-box .sources { margin-top: 10px; }
+.house-files-box { margin: 0 0 18px; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid #3d6797; border-radius: 3px; background: var(--paper-2); }
+.house-files-box .bv-h { margin-top: 0; }
+.hf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.hf-who { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 14px; color: var(--ink-2); }
+.hf-who .mono.sm { margin-right: 6px; }
+.hf-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hf-name { font-size: 14px; color: var(--ink); margin-right: 4px; }
+.drive-icon.sm { width: 28px; height: 28px; }
+.drive-icon.sm svg { width: 15px; height: 14px; }

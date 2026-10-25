@@ -38,6 +38,10 @@ export const when = (iso) => {
 export { stars };
 const ICON_OUT = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M5 2h7v7M12 2L5.5 8.5M10 9.5V12H2V4h2.5" stroke="currentColor" stroke-width="1.4"/></svg>';
 const DRIVE_ICON = '<svg width="22" height="20" viewBox="0 0 22 20" fill="none" aria-hidden="true"><path d="M7.5 1h7l7 12-3.5 6h-14L.5 13l7-12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.5 1l7 12M14.5 1l-7 12M.5 13h21" stroke="currentColor" stroke-width="1.4"/></svg>';
+// Data from friends' shelves is never trusted as-is: Drive items are rebuilt from their link,
+// and other links must be plain http(s) addresses.
+const safeDrive = (d) => (d ? parseDrive(d.url || d.open || '') : null);
+const safeLinks = (links) => (Array.isArray(links) ? links : []).map((l) => ({ label: String((l && l.label) || '').slice(0, 80), url: normalizeUrl(l && l.url) })).filter((l) => l.url);
 const ext = (url, label) => `<a class="ext" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}${ICON_OUT}</a>`;
 
 const EMBLEM = '<svg width="92" height="92" viewBox="0 0 92 92" fill="none" aria-hidden="true"><circle cx="46" cy="46" r="44" stroke="currentColor"/><circle cx="46" cy="46" r="30" stroke="currentColor"/><path d="M46 2v88M2 46h88" stroke="currentColor"/></svg>';
@@ -169,7 +173,7 @@ export class BookView {
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
         ${this.pocketHtml(b, cn)}
       </div>
-      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
+      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? '<div class="house-files"></div>' + this.shareToggleHtml(b) + this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
         <button type="button" class="btn btn-solid" data-act="cover">${this.coverOpen ? 'Fechar livro' : 'Abrir livro'}</button>
         ${b.drive ? '<button type="button" class="btn btn-drive" data-act="read-file">' + DRIVE_ICON + 'Ler o arquivo</button>' : ''}
@@ -458,6 +462,9 @@ export class BookView {
     const others = feed.reviews.filter((r) => r.key === key && r.who.id !== me.id && !(owner && r.who.id === owner.id));
     const readingNow = feed.reading.filter((r) => r.key === key && r.who.id !== me.id);
     const ownerId = owner ? owner.id : me.id;
+    this.houseFiles = (feed.files.get(key) || []).filter((f) => f.who.id !== ownerId && f.who.id !== me.id);
+    const hf = this.info.querySelector('.house-files');
+    if (hf) hf.innerHTML = this.houseFilesHtml(this.houseFiles);
     this.pocketHouse = [
       ...(feed.done.get(key) || []).filter((d) => d.who.id !== ownerId).map((d) => ({ at: d.at, who: d.who.display_name, what: 'leu', done: true, house: true })),
       ...feed.reading.filter((r) => r.key === key && r.who.id !== ownerId).map((r) => ({ at: r.at, who: r.who.display_name, what: r.page ? `está na pág. ${r.page}` : 'está lendo', house: true })),
@@ -528,14 +535,19 @@ export class BookView {
   driveHtml(b) {
     const d = b.drive;
     if (store.isReadOnly()) {
-      if (!d) return '';
-      return `<section class="drive-box has-file" aria-labelledby="dr-h">
-        <h3 class="bv-h" id="dr-h">Arquivo compartilhado por ${esc(store.visiting().display_name)}</h3>
-        <div class="drive-card"><span class="drive-icon">${DRIVE_ICON}</span><div class="drive-meta"><strong>${esc(d.name || d.label)}</strong><span>${esc(d.label)}</span></div></div>
+      // A friend's shelf: rebuild the Drive address from the link itself, never trust stored URLs.
+      const safe = safeDrive(d);
+      const links = safeLinks(b.links);
+      if (!safe && !links.length) return '';
+      const who = store.visiting().display_name;
+      return `<section class="drive-box has-file shared-box" aria-labelledby="dr-h">
+        <h3 class="bv-h" id="dr-h">Compartilhado por ${esc(who)}</h3>
+        ${safe ? `<div class="drive-card"><span class="drive-icon">${DRIVE_ICON}</span><div class="drive-meta"><strong>${esc(d.name || safe.label)}</strong><span>${esc(safe.label)}</span></div></div>
         <div class="row">
           <button type="button" class="btn btn-solid" data-act="read-file">Ler aqui</button>
-          <a class="btn" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
-        </div>
+          <a class="btn" href="${esc(safe.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
+        </div>` : ''}
+        ${links.length ? `<ul class="sources">${links.map((l) => `<li class="src src-mine"><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(l.label || hostOf(l.url))}</strong>${ICON_OUT}</a><span>${esc(hostOf(l.url))}</span></li>`).join('')}</ul>` : ''}
       </section>`;
     }
     if (d) {
@@ -550,8 +562,7 @@ export class BookView {
           <a class="btn" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a>
           <button type="button" class="link-btn" data-act="drive-remove">Desanexar</button>
         </div>
-        <label class="check"><input type="checkbox" data-drive-share ${b.driveShared ? 'checked' : ''}><span>Deixar os leitores da casa abrirem este arquivo</span></label>
-        <p class="bv-note">Para abrir aqui no site, o arquivo precisa estar compartilhado no Drive como “Qualquer pessoa com o link”. Se for privado, use “Abrir no Drive”.</p>
+        <p class="bv-note">Para abrir aqui no site (você e quem mora com você), o arquivo precisa estar compartilhado no Drive como “Qualquer pessoa com o link”.</p>
       </section>`;
     }
     return `<section class="drive-box" aria-labelledby="dr-h">
@@ -562,6 +573,31 @@ export class BookView {
         <p class="form-error" role="alert"></p>
         <button type="submit" class="btn">Anexar arquivo</button>
       </form>
+    </section>`;
+  }
+
+  shareToggleHtml(b) {
+    if (store.isReadOnly() || !cloud.currentProfile()) return '';
+    const global = store.settings().shareLinks !== false;
+    if (!global) return '<p class="share-note">Seus links e arquivos estão só com você. Para mostrar às casas, ligue a opção em Leitores › Sua ficha.</p>';
+    return `<label class="check share-note"><input type="checkbox" data-links-share ${b.linksPrivate ? '' : 'checked'}><span>Quem mora comigo vê os meus links e o arquivo deste livro</span></label>`;
+  }
+
+  houseFilesHtml(entries) {
+    if (!entries.length) return '';
+    return `<section class="house-files-box" aria-labelledby="hf-h">
+      <h3 class="bv-h" id="hf-h">Da casa</h3>
+      <ul class="hf-list">${entries.map((f, i) => {
+        const d = safeDrive(f.drive);
+        const links = safeLinks(f.links);
+        return `<li class="hf-item">
+          <p class="hf-who"><span class="mono sm" aria-hidden="true">${esc((f.who.display_name.trim()[0] || '?').toUpperCase())}</span><strong>${esc(f.who.display_name)}</strong> guardou</p>
+          ${d ? `<div class="row hf-row"><span class="drive-icon sm">${DRIVE_ICON}</span><span class="hf-name">${esc((f.drive && f.drive.name) || d.label)}</span>
+            <button type="button" class="btn btn-sm" data-read-house="${i}">Ler aqui</button>
+            <a class="btn btn-sm" href="${esc(d.open)}" target="_blank" rel="noopener noreferrer">Abrir no Drive${ICON_OUT}</a></div>` : ''}
+          ${links.length ? `<ul class="sources">${links.map((l) => `<li class="src src-mine"><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(l.label || hostOf(l.url))}</strong>${ICON_OUT}</a><span>${esc(hostOf(l.url))}</span></li>`).join('')}</ul>` : ''}
+        </li>`;
+      }).join('')}</ul>
     </section>`;
   }
 
@@ -593,14 +629,16 @@ export class BookView {
     if (!b.drive && btn) btn.remove();
   }
 
-  openReader() {
+  openReader(drive = null) {
     const b = this.book;
-    if (!b || !b.drive) return;
+    const src = drive || (b && b.drive);
+    const d = src && (store.isReadOnly() || drive ? safeDrive(src) : src);
+    if (!b || !d) return;
     const r = document.getElementById('reader');
-    r.querySelector('.reader-title').textContent = b.drive.name || b.title;
-    r.querySelector('.reader-open').href = b.drive.open;
+    r.querySelector('.reader-title').textContent = src.name || b.title;
+    r.querySelector('.reader-open').href = d.open;
     const frame = r.querySelector('iframe');
-    frame.src = b.drive.preview;
+    frame.src = d.preview;
     frame.title = `Arquivo de ${b.title}`;
     r.hidden = false;
     if (!this.reduce) gsap.fromTo(r.querySelector('.reader-sheet'), { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'expo.out' });
@@ -808,6 +846,8 @@ export class BookView {
       this.renderReviews();
       return;
     }
+    const rh = e.target.closest('[data-read-house]');
+    if (rh) { const f = (this.houseFiles || [])[+rh.dataset.readHouse]; if (f) this.openReader(f.drive); return; }
     const stepBtn = e.target.closest('[data-step]');
     if (stepBtn) {
       const b = this.book;
@@ -842,9 +882,9 @@ export class BookView {
   }
 
   onChange(e) {
-    if (e.target.matches('[data-drive-share]')) {
-      store.updateBook(this.id, { driveShared: e.target.checked });
-      this.flash(e.target.checked ? 'Os leitores da casa podem abrir este arquivo.' : 'O arquivo voltou a ser só seu.');
+    if (e.target.matches('[data-links-share]')) {
+      store.updateBook(this.id, { linksPrivate: !e.target.checked });
+      this.flash(e.target.checked ? 'Quem mora com você vê os links e o arquivo deste livro.' : 'Os links e o arquivo deste livro ficaram só com você.');
       return;
     }
     if (e.target.matches('[data-page], [data-range]')) { this.saveProgress({ page: +e.target.value }); return; }

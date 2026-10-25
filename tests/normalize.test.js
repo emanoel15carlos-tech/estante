@@ -99,7 +99,7 @@ test('parseDrive recognises Drive and Docs links', () => {
   assert.equal(parseDrive('javascript:alert(1)'), null);
 });
 
-test('cloud split: links and Drive always private, reading shared unless turned off, reviews by choice', async () => {
+test('cloud split: reading shared unless turned off, private reviews stay private', async () => {
   const { splitState, joinState, bookKey } = await import('../src/lib/cloud.js');
   const state = { seedVersion: 3, removedSections: [], sections: [{ id: 'fi', name: 'Ficção' }], books: [
     { id: 'a', title: 'Dom Casmurro', authors: ['Machado de Assis'], status: 'lendo', progress: { page: 50, total: 200 },
@@ -109,7 +109,7 @@ test('cloud split: links and Drive always private, reading shared unless turned 
   ] };
   const { pub, priv } = splitState(state);
   const p = JSON.stringify(pub);
-  assert.equal(p.includes('x.org'), false);
+  assert.equal(p.includes('x.org'), true); // shared with house mates by default
   assert.equal(p.includes('segredo'), false);
   assert.equal(p.includes('público'), true);
   assert.equal(pub.books[0].status, 'lendo');
@@ -129,12 +129,21 @@ test('cloud split: links and Drive always private, reading shared unless turned 
   assert.equal(bookKey({ title: 'Dom  Casmurro!', authors: ['Machado de ASSIS'] }), bookKey(state.books[0]));
 });
 
-test('shared Drive file goes public only when the reader allows it', async () => {
-  const { splitState } = await import('../src/lib/cloud.js');
-  const base = { seedVersion: 3, removedSections: [], sections: [], books: [{ id: 'a', title: 'A', drive: { id: 'D' } }] };
-  assert.equal(splitState(base).pub.books[0].drive, undefined);
-  const shared = { ...base, books: [{ ...base.books[0], driveShared: true }] };
-  assert.equal(splitState(shared).pub.books[0].drive.id, 'D');
+test('links and Drive are shared with house mates unless turned off', async () => {
+  const { splitState, joinState } = await import('../src/lib/cloud.js');
+  const book = { id: 'a', title: 'A', drive: { id: 'D', url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view' }, links: [{ id: 'l', url: 'https://x.org' }] };
+  const base = { seedVersion: 3, removedSections: [], sections: [], books: [book] };
+  const open = splitState(base);
+  assert.equal(open.pub.books[0].drive.id, 'D');
+  assert.equal(open.pub.files.length, 1);
+  assert.equal(open.pub.files[0].links[0].url, 'https://x.org');
+  const onePrivate = splitState({ ...base, books: [{ ...book, linksPrivate: true }] });
+  assert.equal(onePrivate.pub.books[0].drive, undefined);
+  assert.equal(onePrivate.pub.files.length, 0);
+  assert.equal(joinState(onePrivate.pub, onePrivate.priv).books[0].links[0].url, 'https://x.org');
+  const allPrivate = splitState({ ...base, settings: { shareLinks: false } });
+  assert.equal(JSON.stringify(allPrivate.pub).includes('x.org'), false);
+  assert.equal(joinState(allPrivate.pub, allPrivate.priv).books[0].drive.id, 'D');
 });
 
 test('reading stats count books finished this year, the goal and pages this month', async () => {
