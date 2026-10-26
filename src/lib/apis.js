@@ -487,3 +487,59 @@ function mapIa(docs) {
     url: `https://archive.org/details/${d.identifier}`,
   }));
 }
+
+/* ------------------------------------------------------------------ */
+/* Free audiobooks: LibriVox recordings (public domain), hosted on the Internet Archive */
+
+const LANG_PT = /portug|^por$|^pt/i;
+
+/** LibriVox recordings of a book. Portuguese recordings first. */
+export async function librivoxRecordings(book, { signal } = {}) {
+  const title = iaTerm(book.searchTitle || book.title);
+  if (!title) return [];
+  const titles = [...new Set([iaTerm(book.title), title].filter(Boolean))];
+  const surnames = [...new Set([(book.authors || [])[0], book.searchAuthor]
+    .filter(Boolean).map((a) => iaTerm(String(a).split(' ').pop())).filter((x) => x.length > 2))];
+  const parts = ['collection:(librivoxaudio)', `title:(${titles.map((t) => `(${t})`).join(' OR ')})`];
+  if (surnames.length) parts.push(`creator:(${surnames.join(' OR ')})`);
+  const q = parts.join(' AND ');
+  const url = `${IA_SEARCH}?q=${encodeURIComponent(q)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=language&fl[]=downloads&sort[]=downloads+desc&rows=12&output=json`;
+  return cached('lv:' + q, async () => {
+    const data = await getJson(url, { signal, timeout: 20000 });
+    const docs = (data && data.response && data.response.docs) || [];
+    return docs
+      .filter((d) => !PIRATE.test(`${d.identifier} ${d.title}`))
+      .map((d) => {
+        const LANGS = { por: 'português', pt: 'português', eng: 'inglês', en: 'inglês', spa: 'espanhol', fre: 'francês', fra: 'francês', ger: 'alemão', deu: 'alemão', ita: 'italiano', rus: 'russo', lat: 'latim' };
+        const lang = [].concat(d.language || []).map((x) => LANGS[String(x).toLowerCase()] || x).join(', ');
+        return {
+          id: d.identifier,
+          title: Array.isArray(d.title) ? d.title[0] : d.title,
+          language: lang,
+          pt: LANG_PT.test(lang),
+          downloads: d.downloads || 0,
+          url: `https://archive.org/details/${d.identifier}`,
+        };
+      })
+      .sort((a, b) => Number(b.pt) - Number(a.pt) || b.downloads - a.downloads)
+      .slice(0, 6);
+  });
+}
+
+/** The MP3 chapters of an Internet Archive audio item, in order. */
+export async function archiveTracks(identifier, { signal } = {}) {
+  if (!/^[\w.-]+$/.test(identifier)) return [];
+  return cached('iatracks:' + identifier, async () => {
+    const data = await getJson(`https://archive.org/metadata/${identifier}`, { signal, timeout: 20000 });
+    const files = (data && data.files) || [];
+    // LibriVox keeps a light 64 kbps copy of every chapter; use it when present.
+    const light = files.filter((f) => /_64kb\.mp3$/i.test(f.name));
+    const list = (light.length ? light : files.filter((f) => /\.mp3$/i.test(f.name)))
+      .sort((a, b) => String(a.track || a.name).localeCompare(String(b.track || b.name), 'pt', { numeric: true }));
+    return list.slice(0, 200).map((f, i) => ({
+      title: (f.title || f.name.replace(/(_64kb)?\.mp3$/i, '').replace(/[_-]+/g, ' ')).trim() || `Faixa ${i + 1}`,
+      url: `https://archive.org/download/${identifier}/${encodeURIComponent(f.name)}`,
+      length: Number(f.length) || 0,
+    }));
+  });
+}

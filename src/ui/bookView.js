@@ -4,7 +4,8 @@ import { gsap } from 'gsap';
 import * as store from '../lib/store.js';
 import * as cloud from '../lib/cloud.js';
 import * as social from './social.js';
-import { SOURCE_LABEL, bookInsights, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
+import { SOURCE_LABEL, archiveTracks, bookInsights, librivoxRecordings, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
+import { parseTracks } from './player.js';
 import { esc, hostOf, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
 const STATUS = [
@@ -19,6 +20,7 @@ const TABS = [
   ['sobre', 'Sobre'],
   ['resenhas', 'Resenhas'],
   ['ler', 'Ler e baixar'],
+  ['ouvir', 'Ouvir'],
   ['leitores', 'Leitores'],
   ['temas', 'Temas'],
   ['parecidos', 'Parecidos'],
@@ -42,12 +44,17 @@ const DRIVE_ICON = '<svg width="22" height="20" viewBox="0 0 22 20" fill="none" 
 // and other links must be plain http(s) addresses.
 const safeDrive = (d) => (d ? parseDrive(d.url || d.open || '') : null);
 const safeLinks = (links) => (Array.isArray(links) ? links : []).map((l) => ({ label: String((l && l.label) || '').slice(0, 80), url: normalizeUrl(l && l.url) })).filter((l) => l.url);
+const safeTracks = (tracks) => (Array.isArray(tracks) ? tracks : []).map((t) => {
+  const url = t && (parseDrive(t.url) ? parseDrive(t.url).url : normalizeUrl(t.url));
+  return url ? { title: String((t && t.title) || 'Faixa').slice(0, 120), url } : null;
+}).filter(Boolean).slice(0, 200);
 const ext = (url, label) => `<a class="ext" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}${ICON_OUT}</a>`;
 
 const EMBLEM = '<svg width="92" height="92" viewBox="0 0 92 92" fill="none" aria-hidden="true"><circle cx="46" cy="46" r="44" stroke="currentColor"/><circle cx="46" cy="46" r="30" stroke="currentColor"/><path d="M46 2v88M2 46h88" stroke="currentColor"/></svg>';
 
 export class BookView {
-  constructor({ reduce, getList, onOpenChange }) {
+  constructor({ reduce, getList, onOpenChange, player }) {
+    this.player = player;
     this.reduce = reduce;
     this.getList = getList; // ids in the order the shelves show them
     this.onOpenChange = onOpenChange;
@@ -79,6 +86,8 @@ export class BookView {
       if (pct) pct.textContent = Math.round((v / +e.target.max) * 100) + '%';
     });
     this.info.addEventListener('submit', (e) => {
+      const af = e.target.closest('[data-audio-form]');
+      if (af) { e.preventDefault(); this.onAudioSubmit(af); return; }
       const pp = e.target.closest('[data-propose-form]');
       if (pp) { e.preventDefault(); this.onPropose(pp); return; }
       const rv = e.target.closest('[data-review-form]');
@@ -131,7 +140,7 @@ export class BookView {
   }
 
   renderInfo(b) {
-    if (this.pocketFor !== b.id) { this.pocketHouse = []; this.pocketFor = b.id; }
+    if (this.pocketFor !== b.id) { this.pocketHouse = []; this.pocketFor = b.id; this.lvList = null; this.houseAudio = []; this.editingAudio = false; }
     const sections = store.getState().sections;
     const section = sections.find((s) => s.id === b.sectionId);
     const src = b.source && SOURCE_LABEL[b.source];
@@ -173,7 +182,7 @@ export class BookView {
         ${prov ? `<p class="provenance">${prov}</p>` : ''}
         ${this.pocketHtml(b, cn)}
       </div>
-      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? '<div class="house-files"></div>' + this.shareToggleHtml(b) + this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
+      ${TABS.slice(1).map(([id]) => `<div class="bv-panel" role="tabpanel" id="bvp-${id}" aria-labelledby="bvt-${id}"${tab === id ? '' : ' hidden'}>${id === 'ler' ? '<div class="house-files"></div>' + this.shareToggleHtml(b) + this.driveHtml(b) + this.myLinksHtml(b) + '<div class="ler-auto"><p class="bv-loading">Buscando informações na Open Library…</p></div>' : id === 'resenhas' ? this.reviewsHtml(b) : id === 'ouvir' ? this.listenHtml(b) : '<p class="bv-loading">Buscando informações na Open Library…</p>'}</div>`).join('')}
       <div class="row bv-actions">
         <button type="button" class="btn btn-solid" data-act="cover">${this.coverOpen ? 'Fechar livro' : 'Abrir livro'}</button>
         ${b.drive ? '<button type="button" class="btn btn-drive" data-act="read-file">' + DRIVE_ICON + 'Ler o arquivo</button>' : ''}
@@ -247,6 +256,167 @@ export class BookView {
     const slot = this.info.querySelector('.bookmark-slot');
     if (!slot) return;
     slot.insertAdjacentHTML('beforeend', `<p class="bm-done" role="status">${esc(text)}</p>`);
+  }
+
+  /* ---------------- Ouvir: audiobooks ---------------- */
+
+  listenItem(b, tracks, { who = null, key = null, own = false } = {}) {
+    const item = {
+      key: key || `${who ? who.id : 'eu'}:${b.id}`,
+      title: b.title,
+      author: (b.authors || [])[0] || '',
+      cover: b.cover && !String(b.cover).startsWith('data:') ? b.cover : null,
+      color: b.color,
+      who: who ? who.display_name : null,
+      tracks,
+    };
+    if (own && b.audiobook && b.audiobook.pos) item.startAt = b.audiobook.pos;
+    if (own) item.onSave = (pos) => { const cur = store.getState().books.find((x) => x.id === b.id); if (cur && cur.audiobook) store.updateBook(b.id, { audiobook: { ...cur.audiobook, pos } }, { listen: true }); };
+    return item;
+  }
+
+  audioCard(b, ab, { who = null, own = false, idx = '' } = {}) {
+    const tracks = safeTracks(ab && ab.tracks);
+    if (!tracks.length) return '';
+    const pos = own ? ab.pos : null;
+    const where = pos && (pos.i || pos.t) ? `Continuar ${tracks.length > 1 ? `em “${esc((tracks[pos.i] || tracks[0]).title)}”, ` : 'em '}${Math.floor((pos.t || 0) / 60)} min` : 'Começar do início';
+    const label = ab.source === 'librivox' ? 'Gravação do LibriVox (domínio público)' : ab.source === 'fadebooks' ? 'Gerado com o FadeBooks' : 'Audiobook';
+    return `<div class="audio-card${own ? ' is-own' : ''}">
+      <span class="ac-disc" aria-hidden="true"></span>
+      <div class="ac-main">
+        <p class="ac-kicker">${who ? `De ${esc(who.display_name)}` : label}</p>
+        <p class="ac-title serif">${tracks.length} ${tracks.length === 1 ? 'faixa' : 'capítulos'}</p>
+        <div class="row">
+          <button type="button" class="btn btn-solid btn-sm" data-listen="${own ? 'own' : 'house'}" data-idx="${idx}">${this.player && this.player.isCurrent(this.listenKey(b, who)) && this.player.playing ? 'Tocando agora' : `▶ ${where}`}</button>
+          ${own ? '<button type="button" class="link-btn" data-act="audio-edit">Trocar</button><button type="button" class="link-btn danger" data-act="audio-remove">Remover</button>' : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  listenKey(b, who) { return `${who ? who.id : 'eu'}:${b.id}`; }
+
+  listenHtml(b) {
+    const ro = store.isReadOnly();
+    const owner = store.visiting();
+    let html = '<div class="house-audio"></div>';
+    if (ro) {
+      html += b.audiobook ? `<h3 class="bv-h">Audiobook de ${esc(owner.display_name)}</h3>${this.audioCard(b, b.audiobook, { who: owner })}` : '';
+    } else if (b.audiobook && !this.editingAudio) {
+      html += `<h3 class="bv-h">Meu audiobook</h3>${this.audioCard(b, b.audiobook, { own: true })}`;
+    } else {
+      const cur = b.audiobook ? safeTracks(b.audiobook.tracks).map((t) => `${t.title} | ${t.url}`).join('\n') : '';
+      html += `<form class="audio-form" data-audio-form novalidate>
+        <h3 class="bv-h">Meu audiobook</h3>
+        <label class="field"><span class="field-label">Links do áudio, um por linha</span>
+          <textarea name="tracks" rows="4" placeholder="Capítulo 1 | https://drive.google.com/file/d/…&#10;Capítulo 2 | https://drive.google.com/file/d/…">${esc(cur)}</textarea>
+          <span class="hint-line">Pode ser um arquivo só (o livro inteiro) ou um link por capítulo. O nome antes do “|” é opcional. Vale link do Google Drive ou de qualquer MP3 público.</span></label>
+        <label class="check"><input type="checkbox" name="fadebooks" ${b.audiobook && b.audiobook.source === 'fadebooks' ? 'checked' : ''}><span>Gerado com o FadeBooks</span></label>
+        <p class="form-error" role="alert"></p>
+        <div class="row"><button type="submit" class="btn btn-solid">Guardar audiobook</button>${b.audiobook ? '<button type="button" class="link-btn" data-act="audio-cancel">Cancelar</button>' : ''}</div>
+      </form>
+      <details class="fadebooks-help">
+        <summary>Como transformar o PDF em audiobook com o FadeBooks</summary>
+        <ol>
+          <li>Abra o FadeBooks no seu computador e arraste o PDF do livro. Ele narra e monta o áudio com os efeitos.</li>
+          <li>Os arquivos ficam na pasta <code>FadeBooks</code> da sua pasta de usuário. Envie o livro completo (ou a pasta de capítulos) para o Google Drive.</li>
+          <li>No Drive, compartilhe como “Qualquer pessoa com o link”, copie o link de cada arquivo e cole acima.</li>
+        </ol>
+        <a class="btn btn-sm" href="http://127.0.0.1:8765/" target="_blank" rel="noopener">Abrir o FadeBooks</a>
+        <span class="hint-line">O botão só funciona com o FadeBooks aberto neste computador.</span>
+      </details>`;
+    }
+    html += '<div class="librivox"><h3 class="bv-h">Gratuito, em domínio público</h3><p class="bv-loading">Procurando gravações no LibriVox…</p></div>';
+    return html;
+  }
+
+  renderListen() {
+    const p = this.panel('ouvir');
+    if (!p || !this.book) return;
+    p.innerHTML = this.listenHtml(this.book);
+    this.renderHouseAudio();
+    if (this.lvList) this.renderLibrivox(this.lvList); else this.loadLibrivox(true);
+  }
+
+  onAudioSubmit(form) {
+    const err = form.querySelector('.form-error');
+    const tracks = parseTracks(form.elements.tracks.value);
+    if (!tracks.length) { err.textContent = 'Cole pelo menos um link de áudio (Google Drive ou MP3 público).'; form.elements.tracks.focus(); return; }
+    const b = this.book;
+    store.updateBook(b.id, { audiobook: { tracks, source: form.elements.fadebooks.checked ? 'fadebooks' : 'link', addedAt: new Date().toISOString(), pos: null } });
+    this.editingAudio = false;
+    this.renderListen();
+    this.flash('Audiobook guardado. Quem mora com você também pode ouvir.');
+  }
+
+  playListen(btn) {
+    const b = this.book;
+    if (!this.player || !b) return;
+    if (btn.dataset.listen === 'own' || (btn.dataset.listen === 'house' && store.isReadOnly() && btn.dataset.idx === '')) {
+      const ro = store.isReadOnly();
+      const who = ro ? store.visiting() : null;
+      this.player.load(this.listenItem(b, safeTracks(b.audiobook.tracks), { who, own: !ro, key: this.listenKey(b, who) }));
+    } else if (btn.dataset.listen === 'house') {
+      const f = (this.houseAudio || [])[+btn.dataset.idx];
+      if (f) this.player.load(this.listenItem(b, safeTracks(f.audiobook.tracks), { who: f.who, key: this.listenKey(b, f.who) }));
+    }
+    btn.textContent = 'Tocando agora';
+  }
+
+  renderHouseAudio() {
+    const slot = this.info.querySelector('.house-audio');
+    if (!slot || !this.book) return;
+    const list = this.houseAudio || [];
+    slot.innerHTML = list.length ? `<h3 class="bv-h">Da casa</h3>${list.map((f, i) => this.audioCard(this.book, f.audiobook, { who: f.who, idx: String(i) })).join('')}` : '';
+  }
+
+  async loadLibrivox(force = false) {
+    const b = this.book;
+    const id = this.id;
+    const box = this.info.querySelector('.librivox');
+    if (!b || !box || (!force && box.dataset.loaded === b.id)) return;
+    box.dataset.loaded = b.id;
+    let list = null;
+    try { list = await librivoxRecordings(b); } catch (e) { list = null; }
+    if (this.id !== id) return;
+    this.lvList = list;
+    this.renderLibrivox(list);
+  }
+
+  renderLibrivox(list) {
+    const box = this.info.querySelector('.librivox');
+    if (!box) return;
+    const ro = store.isReadOnly();
+    if (!list) { box.innerHTML = '<h3 class="bv-h">Gratuito, em domínio público</h3><p class="bv-text">O LibriVox não respondeu agora. Tente abrir o livro de novo daqui a pouco.</p>'; return; }
+    if (!list.length) { box.innerHTML = '<h3 class="bv-h">Gratuito, em domínio público</h3><p class="bv-text">Não achamos gravação gratuita deste livro no LibriVox. Eles gravam obras em domínio público, em geral clássicos.</p>'; return; }
+    box.innerHTML = `<h3 class="bv-h">Gratuito, em domínio público</h3>
+      <ul class="sources lv-list">${list.map((r, i) => `<li class="src src-audio">
+        <span class="lv-title"><strong>${esc(r.title)}</strong>${r.pt ? '<span class="lv-pt">em português</span>' : ''}</span>
+        <span>${esc(r.language || 'idioma não informado')} · LibriVox, gravado por voluntários</span>
+        <span class="row lv-actions"><button type="button" class="btn btn-sm" data-lv-play="${i}">▶ Ouvir</button>${ro ? '' : `<button type="button" class="link-btn" data-lv-keep="${i}">Guardar como meu audiobook</button>`}<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" class="link-btn">Ver no Archive${ICON_OUT}</a></span>
+      </li>`).join('')}</ul>`;
+  }
+
+  async useLibrivox(i, keep, btn) {
+    const r = (this.lvList || [])[i];
+    const b = this.book;
+    if (!r || !b) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Carregando…';
+    let tracks = [];
+    try { tracks = await archiveTracks(r.id); } catch (e) { tracks = []; }
+    btn.disabled = false;
+    btn.textContent = label;
+    if (!tracks.length) { this.flash('Não achamos os arquivos de áudio dessa gravação.'); return; }
+    const clean = tracks.map((t) => ({ title: t.title, url: t.url }));
+    if (keep) {
+      store.updateBook(b.id, { audiobook: { tracks: clean, source: 'librivox', id: r.id, addedAt: new Date().toISOString(), pos: null } });
+      this.renderListen();
+      this.flash('Gravação do LibriVox guardada neste livro.');
+    } else if (this.player) {
+      this.player.load(this.listenItem(b, clean, { key: `lv:${r.id}` }));
+    }
   }
 
   /* ---------------- loan card in the book's pocket ---------------- */
@@ -463,6 +633,8 @@ export class BookView {
     const readingNow = feed.reading.filter((r) => r.key === key && r.who.id !== me.id);
     const ownerId = owner ? owner.id : me.id;
     this.houseFiles = (feed.files.get(key) || []).filter((f) => f.who.id !== ownerId && f.who.id !== me.id);
+    this.houseAudio = this.houseFiles.filter((f) => f.audiobook && safeTracks(f.audiobook.tracks).length);
+    this.renderHouseAudio();
     const hf = this.info.querySelector('.house-files');
     if (hf) hf.innerHTML = this.houseFilesHtml(this.houseFiles);
     this.pocketHouse = [
@@ -506,6 +678,7 @@ export class BookView {
     const p = this.panel(id);
     if (p && !this.reduce) gsap.fromTo(p, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power3.out' });
     if (id === 'parecidos') this.loadSimilar();
+    if (id === 'ouvir') this.loadLibrivox();
   }
 
   async loadInsights(b) {
@@ -520,7 +693,7 @@ export class BookView {
       ? '<p class="bv-loading">Não foi possível falar com a Open Library agora. Tente de novo daqui a pouco.</p>'
       : '<p class="bv-loading">A Open Library não tem esta obra cadastrada.</p>';
     if (!ins) {
-      TABS.slice(1).filter(([t]) => t !== 'resenhas').forEach(([t]) => { const p = t === 'ler' ? this.info.querySelector('.ler-auto') : this.panel(t); if (p) p.innerHTML = msg; });
+      TABS.slice(1).filter(([t]) => t !== 'resenhas' && t !== 'ouvir').forEach(([t]) => { const p = t === 'ler' ? this.info.querySelector('.ler-auto') : this.panel(t); if (p) p.innerHTML = msg; });
       return;
     }
     this.info.querySelector('.ler-auto').innerHTML = this.readHtml(ins);
@@ -580,16 +753,17 @@ export class BookView {
     if (store.isReadOnly() || !cloud.currentProfile()) return '';
     const global = store.settings().shareLinks !== false;
     if (!global) return '<p class="share-note">Seus links e arquivos estão só com você. Para mostrar às casas, ligue a opção em Leitores › Sua ficha.</p>';
-    return `<label class="check share-note"><input type="checkbox" data-links-share ${b.linksPrivate ? '' : 'checked'}><span>Quem mora comigo vê os meus links e o arquivo deste livro</span></label>`;
+    return `<label class="check share-note"><input type="checkbox" data-links-share ${b.linksPrivate ? '' : 'checked'}><span>Quem mora comigo vê os meus links, o arquivo e o audiobook deste livro</span></label>`;
   }
 
   houseFilesHtml(entries) {
-    if (!entries.length) return '';
+    if (!entries.some((f) => safeDrive(f.drive) || safeLinks(f.links).length)) return '';
     return `<section class="house-files-box" aria-labelledby="hf-h">
       <h3 class="bv-h" id="hf-h">Da casa</h3>
       <ul class="hf-list">${entries.map((f, i) => {
         const d = safeDrive(f.drive);
         const links = safeLinks(f.links);
+        if (!d && !links.length) return '';
         return `<li class="hf-item">
           <p class="hf-who"><span class="mono sm" aria-hidden="true">${esc((f.who.display_name.trim()[0] || '?').toUpperCase())}</span><strong>${esc(f.who.display_name)}</strong> guardou</p>
           ${d ? `<div class="row hf-row"><span class="drive-icon sm">${DRIVE_ICON}</span><span class="hf-name">${esc((f.drive && f.drive.name) || d.label)}</span>
@@ -634,12 +808,18 @@ export class BookView {
     const src = drive || (b && b.drive);
     const d = src && (store.isReadOnly() || drive ? safeDrive(src) : src);
     if (!b || !d) return;
+    this.showReader(d, src.name || b.title);
+  }
+
+  /** Opens Drive's own viewer/player for a (trusted, rebuilt) Drive item. */
+  showReader(d, title) {
+    if (!d) return;
     const r = document.getElementById('reader');
-    r.querySelector('.reader-title').textContent = src.name || b.title;
+    r.querySelector('.reader-title').textContent = title;
     r.querySelector('.reader-open').href = d.open;
     const frame = r.querySelector('iframe');
     frame.src = d.preview;
-    frame.title = `Arquivo de ${b.title}`;
+    frame.title = title;
     r.hidden = false;
     if (!this.reduce) gsap.fromTo(r.querySelector('.reader-sheet'), { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'expo.out' });
     r.querySelector('.reader-close').focus();
@@ -846,6 +1026,12 @@ export class BookView {
       this.renderReviews();
       return;
     }
+    const lsn = e.target.closest('[data-listen]');
+    if (lsn) { this.playListen(lsn); return; }
+    const lvp = e.target.closest('[data-lv-play]');
+    if (lvp) { this.useLibrivox(+lvp.dataset.lvPlay, false, lvp); return; }
+    const lvk = e.target.closest('[data-lv-keep]');
+    if (lvk) { this.useLibrivox(+lvk.dataset.lvKeep, true, lvk); return; }
     const rh = e.target.closest('[data-read-house]');
     if (rh) { const f = (this.houseFiles || [])[+rh.dataset.readHouse]; if (f) this.openReader(f.drive); return; }
     const stepBtn = e.target.closest('[data-step]');
@@ -877,6 +1063,13 @@ export class BookView {
     else if (act === 'start-reading') { store.updateBook(this.id, { status: 'lendo' }); this.setStatusUi('lendo'); const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
     else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null, driveShared: false }, { drive: true }); this.refreshDrive(); }
     else if (act === 'propose') this.showPropose();
+    else if (act === 'audio-edit') { this.editingAudio = true; this.renderListen(); }
+    else if (act === 'audio-cancel') { this.editingAudio = false; this.renderListen(); }
+    else if (act === 'audio-remove') {
+      if (el.dataset.armed !== '1') { el.dataset.armed = '1'; el.textContent = 'Confirmar remoção'; return; }
+      store.updateBook(this.id, { audiobook: null });
+      this.renderListen();
+    }
     else if (act === 'pocket') this.togglePocket(el);
     else if (act === 'propose-cancel') this.renderClub();
   }

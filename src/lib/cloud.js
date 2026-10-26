@@ -12,7 +12,7 @@ const ANON = (import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || 'eyJ
 
 // Links and the Drive file are seen by house mates unless the reader turns that off (for all
 // books, or for one book). Reading status and page likewise; each review says if it is published.
-export const PRIVATE_FIELDS = ['links', 'drive'];
+export const PRIVATE_FIELDS = ['links', 'drive', 'audiobook'];
 export const READING_FIELDS = ['status', 'progress', 'history', 'finishedAt'];
 const OWNER_KEY = 'estante:owner';
 const DIRTY_KEY = 'estante:dirty';
@@ -61,7 +61,8 @@ export function splitState(state) {
     if (Object.keys(mine).length) priv[b.id] = mine;
     const info = { bookId: b.id, key: bookKey(b), title: b.title, authors: (b.authors || []).slice(0, 2), cover: plainCover(b.cover), color: b.color, ink: b.ink };
     (pub.reviews || []).forEach((r) => reviews.push({ ...info, ...r }));
-    if (linksOpen && (b.drive || (b.links && b.links.length))) files.push({ ...info, drive: b.drive || null, links: (b.links || []).slice(0, 20) });
+    const audio = b.audiobook && b.audiobook.tracks && b.audiobook.tracks.length ? { source: b.audiobook.source || 'link', tracks: b.audiobook.tracks.slice(0, 200) } : null;
+    if (linksOpen && (b.drive || (b.links && b.links.length) || audio)) files.push({ ...info, drive: b.drive || null, links: (b.links || []).slice(0, 20), audiobook: audio });
     if (share && b.status === 'lendo') reading.push({ ...info, page: (b.progress && b.progress.page) || 0, total: (b.progress && b.progress.total) || b.pageCount || 0, at: (b.progress && b.progress.at) || null });
     return pub;
   });

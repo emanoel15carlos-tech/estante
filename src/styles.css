@@ -976,3 +976,63 @@ button.reader-card:hover .rc-go, button.reader-card:focus-visible .rc-go { opaci
 .hf-name { font-size: 14px; color: var(--ink); margin-right: 4px; }
 .drive-icon.sm { width: 28px; height: 28px; }
 .drive-icon.sm svg { width: 15px; height: 14px; }
+
+/* =========================================================
+   Listening room: audiobook player docked at the bottom
+   ========================================================= */
+body.has-player { padding-bottom: 104px; }
+.player { position: fixed; z-index: 70; left: 50%; bottom: 14px; transform: translateX(-50%); width: min(980px, calc(100% - 24px)); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 10px 14px 10px 10px; border-radius: 10px;
+  background: linear-gradient(180deg, #3a2716, #2a1c10); border: 1px solid #5b3d22; box-shadow: 0 24px 50px -16px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .06); color: var(--text); }
+.player[hidden] { display: none; }
+.pl-disc { position: relative; width: 74px; height: 74px; border-radius: 50%; box-shadow: 0 6px 14px rgba(0, 0, 0, .6); }
+.pl-disc svg { width: 100%; height: 100%; display: block; }
+.pl-label { position: absolute; inset: 27%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px rgba(0, 0, 0, .4); }
+.pl-label img { width: 100%; height: 100%; object-fit: cover; }
+.pl-label::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #111; }
+.pl-disc.is-spinning { animation: spin 3.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pl-main { min-width: 0; display: grid; gap: 2px; }
+.pl-kicker { margin: 0; font: 700 10px var(--type); letter-spacing: .14em; text-transform: uppercase; color: var(--brass); }
+.pl-title { margin: 0; font-size: 20px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-track-row select, .pl-track { max-width: 100%; font: 13px var(--type); color: var(--text-2); background: transparent; border: 0; padding: 0; }
+.pl-track-row select { cursor: pointer; text-overflow: ellipsis; }
+.pl-track-row select option { color: #222; }
+.pl-seek { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; font: 11px var(--type); color: var(--text-3); }
+.pl-seek input { width: 100%; accent-color: var(--brass); }
+.pl-controls { display: flex; align-items: center; gap: 4px; }
+.pl-btn { display: inline-grid; place-items: center; min-width: 38px; height: 38px; padding: 0 6px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text); font: 700 11px var(--type); cursor: pointer; transition: background .2s, border-color .2s; }
+.pl-btn svg { width: 18px; height: 18px; fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.pl-btn:hover { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .12); }
+.pl-play { width: 50px; height: 50px; background: var(--brass); color: var(--brass-ink); }
+.pl-play:hover { background: #d8b363; }
+.pl-play svg { stroke: none; }
+.pl-close svg { fill: none; }
+@media (max-width: 760px) {
+  body.has-player { padding-bottom: 170px; }
+  .player { grid-template-columns: auto minmax(0, 1fr); bottom: 8px; }
+  .pl-disc { width: 56px; height: 56px; }
+  .pl-controls { grid-column: 1 / -1; justify-content: space-between; }
+}
+@media (prefers-reduced-motion: reduce) { .pl-disc.is-spinning { animation: none; } }
+
+/* Ouvir tab */
+.audio-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 3px; background: var(--paper-2); }
+.audio-card.is-own { border-left: 4px solid var(--card-red); }
+.ac-disc { width: 52px; height: 52px; border-radius: 50%; background: radial-gradient(circle, var(--card-red) 0 26%, #111 27% 30%, #1b1b1b 31% 100%); box-shadow: inset 0 0 0 1px #333, 0 4px 8px rgba(0, 0, 0, .35); }
+.ac-kicker { margin: 0; font: 700 10px var(--type); letter-spacing: .12em; text-transform: uppercase; color: var(--card-red); }
+.ac-title { margin: 2px 0 8px; font-size: 18px; color: var(--ink); }
+.audio-card .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.audio-form { display: grid; gap: 10px; margin-bottom: 12px; }
+.audio-form .row { display: flex; gap: 14px; align-items: center; }
+.fadebooks-help { margin: 0 0 18px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 3px; font-size: 14px; color: var(--ink-2); }
+.fadebooks-help summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+.fadebooks-help ol { margin: 10px 0; padding-left: 20px; display: grid; gap: 6px; }
+.lv-list .src-audio { display: grid; gap: 4px; }
+.lv-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.lv-pt { font: 700 10px var(--type); letter-spacing: .08em; text-transform: uppercase; color: #3d6797; border: 1px solid #3d6797; border-radius: 999px; padding: 1px 6px; }
+.lv-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 4px; }
+
+/* headphones mark on a spine with an audiobook */
+.audio-mark { position: absolute; top: 24px; right: 3px; width: 10px; height: 8px; border: 1.6px solid currentColor; border-bottom: 0; border-radius: 6px 6px 0 0; opacity: .85; }
+.audio-mark::before, .audio-mark::after { content: ''; position: absolute; bottom: -4px; width: 3px; height: 5px; background: currentColor; border-radius: 1px; }
+.audio-mark::before { left: -2px; } .audio-mark::after { right: -2px; }

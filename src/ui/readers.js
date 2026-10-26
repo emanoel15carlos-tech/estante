@@ -268,7 +268,7 @@ export class Readers {
           <p class="rc-sync" data-sync></p>
         </div>
         <label class="check rc-share"><input type="checkbox" data-share ${store.settings().shareReading ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar aos leitores o que estou lendo, o que já li e em que página estou</span></label>
-        <label class="check rc-share"><input type="checkbox" data-share-links ${store.settings().shareLinks !== false ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar a quem mora comigo os meus links e arquivos do Drive (dá para esconder livro por livro)</span></label>
+        <label class="check rc-share"><input type="checkbox" data-share-links ${store.settings().shareLinks !== false ? 'checked' : ''}${store.isReadOnly() ? ' disabled' : ''}><span>Mostrar a quem mora comigo os meus links, arquivos do Drive e audiobooks (dá para esconder livro por livro)</span></label>
         <div class="rc-actions">
           <button type="button" class="btn" data-act="copy">Copiar link da minha estante</button>
           <button type="button" class="link-btn" data-act="signout">Sair</button>

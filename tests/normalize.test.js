@@ -165,3 +165,15 @@ test('reading stats count books finished this year, the goal and pages this mont
   assert.equal(store.isPristine({ books: [{ id: 'seed-1', status: 'lido' }] }), false);
   assert.equal(store.isPristine({ books: [{ id: 'x9' }] }), false);
 });
+
+test('audiobook links: Drive files stream, folders open in Drive, names are optional', async () => {
+  const { parseTracks, playable } = await import('../src/ui/player.js');
+  const t = parseTracks('Capítulo 1 | https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=sharing\nhttps://archive.org/download/x/cap2_64kb.mp3\njavascript:alert(1)\n');
+  assert.equal(t.length, 2);
+  assert.equal(t[0].title, 'Capítulo 1');
+  assert.equal(t[1].title, 'Parte 2');
+  assert.equal(playable(t[0].url).src, 'https://drive.google.com/uc?export=download&id=1AbCdEfGhIjKlMnOp');
+  assert.equal(playable('https://drive.google.com/drive/folders/1FolderIdXyz123').src, null);
+  assert.equal(playable('https://archive.org/download/x/cap2_64kb.mp3').src, 'https://archive.org/download/x/cap2_64kb.mp3');
+  assert.equal(playable('javascript:alert(1)'), null);
+});

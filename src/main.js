@@ -11,6 +11,7 @@ import { BookView } from './ui/bookView.js';
 import { AddBook } from './ui/addBook.js';
 import { SectionsPanel } from './ui/sections.js';
 import { Readers } from './ui/readers.js';
+import { Player } from './ui/player.js';
 import * as cloud from './lib/cloud.js';
 import { suggestSection } from './lib/categories.js';
 
@@ -108,7 +109,7 @@ function spineHtml(b, section) {
   }
   return `<span class="slot${b.id === ui.openId ? ' is-out' : ''}" data-flip-id="${esc(b.id)}" data-book="${esc(b.id)}">
     <button type="button" class="spine${b.status === 'lido' ? ' is-read' : ''}" aria-label="${esc(b.title)}, de ${esc((b.authors || []).join(', '))}${b.drive ? ', com arquivo no Drive' : ''}" style="width:${b.spineW}px;height:${b.spineH}px;background:${b.color};color:${b.ink}">
-      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${progressBar(b)}${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}
+      <span class="vt">${esc(b.title)}</span><span class="read-dot"></span>${progressBar(b)}${b.drive ? '<span class="file-mark" title="Tem arquivo no Drive"></span>' : ''}${b.audiobook ? '<span class="audio-mark" title="Tem audiobook"></span>' : ''}
       <span class="callno" aria-hidden="true">${cn.code ? `<span>${esc(cn.code)}</span>` : ''}<span>${esc(cn.cutter)}</span></span>
     </button>
   </span>`;
@@ -297,8 +298,11 @@ try {
   document.querySelector('.stage3d').hidden = true;
 }
 
+const player = new Player({ reduce, toast, openDrive: (d, title) => view.showReader(d, title) });
+
 const view = new BookView({
   reduce,
+  player,
   getList: shelfIds,
   onOpenChange: (id) => {
     const prev = ui.openId;
