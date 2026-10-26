@@ -2,6 +2,7 @@
 // page so the story keeps playing while the reader walks around the shelves.
 import { gsap } from 'gsap';
 import { esc, normalizeUrl, parseDrive } from '../lib/util.js';
+import { sentences } from '../lib/pdftext.js';
 
 const SPEEDS = [0.8, 1, 1.15, 1.25, 1.5, 1.75, 2];
 const POS_PREFIX = 'estante:ouvindo:';
@@ -41,6 +42,32 @@ export function parseTracks(text) {
   }).filter(Boolean).slice(0, 200);
 }
 
+/* ---------------- the browser's own voices (Web Speech API) ---------------- */
+
+export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+
+/** Portuguese voices first (Brazil, then Portugal), the natural/neural ones on top. */
+export function ttsVoices() {
+  if (!canSpeak()) return [];
+  const score = (v) => (/^pt-BR/i.test(v.lang) ? 0 : /^pt/i.test(v.lang) ? 1 : 3) * 10
+    - (/natural|online|neural|premium|enhanced/i.test(v.name) ? 6 : /google/i.test(v.name) ? 4 : 0);
+  return speechSynthesis.getVoices().filter((v) => /^pt/i.test(v.lang)).sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
+}
+
+export function whenVoices() {
+  return new Promise((resolve) => {
+    if (!canSpeak()) return resolve([]);
+    if (speechSynthesis.getVoices().length) return resolve(ttsVoices());
+    const done = () => resolve(ttsVoices());
+    speechSynthesis.addEventListener('voiceschanged', done, { once: true });
+    setTimeout(done, 1500);
+  });
+}
+
+const VOICE_KEY = 'estante:voz';
+export const preferredVoice = () => { try { return localStorage.getItem(VOICE_KEY) || ''; } catch (e) { return ''; } };
+export const setPreferredVoice = (uri) => { try { localStorage.setItem(VOICE_KEY, uri); } catch (e) { /* storage off */ } };
+
 const DISC = '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="49" fill="#111"/><g fill="none" stroke="#2a2a2a" stroke-width=".8"><circle cx="50" cy="50" r="44"/><circle cx="50" cy="50" r="40"/><circle cx="50" cy="50" r="36"/><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="28"/></g><path d="M18 30a38 38 0 0 1 22-14" stroke="rgba(255,255,255,.18)" stroke-width="3" fill="none" stroke-linecap="round"/></svg>';
 
 export class Player {
@@ -58,12 +85,22 @@ export class Player {
 
     this.audio.addEventListener('timeupdate', () => this.tick());
     this.audio.addEventListener('loadedmetadata', () => this.tick());
-    this.audio.addEventListener('play', () => this.setPlaying(true));
-    this.audio.addEventListener('pause', () => { this.setPlaying(false); this.save(true); });
-    this.audio.addEventListener('ended', () => this.next(true));
-    this.audio.addEventListener('error', () => this.failed());
+    const forAudio = (fn) => () => { if (this.item && this.item.kind !== 'tts') fn(); };
+    this.audio.addEventListener('play', forAudio(() => this.setPlaying(true)));
+    this.audio.addEventListener('pause', forAudio(() => { this.setPlaying(false); this.save(true); }));
+    this.audio.addEventListener('ended', forAudio(() => this.next(true)));
+    this.audio.addEventListener('error', forAudio(() => this.failed()));
     this.root.addEventListener('click', (e) => this.onClick(e));
     this.root.addEventListener('input', (e) => {
+      if (e.target.matches('[data-seek]') && this.item && this.item.kind === 'tts') {
+        const n = this.item.chapters[this.tts.ch].paragraphs.length;
+        this.tts.p = Math.min(n - 1, Math.floor((+e.target.value / 1000) * n));
+        this.tts.s = 0;
+        clearTimeout(this.seekT);
+        this.seekT = setTimeout(() => this.restartIfPlaying(), 250);
+        this.updateTts();
+        return;
+      }
       if (e.target.matches('[data-seek]') && isFinite(this.audio.duration)) {
         this.audio.currentTime = (+e.target.value / 1000) * this.audio.duration;
       }
@@ -83,18 +120,23 @@ export class Player {
 
   /** Starts (or resumes) an audiobook. */
   load(item, { autoplay = true, index = null } = {}) {
+    if (item && item.kind === 'tts') item.tracks = item.chapters.map((c) => ({ title: c.title }));
     if (!item || !item.tracks || !item.tracks.length) return;
     const same = this.isCurrent(item.key);
     if (same && index === null) { if (autoplay) this.audio.play().catch(() => {}); return; }
     this.save(true);
+    this.stopSpeaking();
+    this.audio.pause();
     this.item = item;
-    const saved = index !== null ? { i: index, t: 0 } : (item.startAt || this.storedPos(item.key) || { i: 0, t: 0 });
+    const saved = index !== null ? { i: index, t: 0, p: -1 } : (item.startAt || this.storedPos(item.key) || { i: 0, t: 0, p: -1 });
     this.render();
     this.show();
+    if (item.kind === 'tts') { this.tts = { ch: Math.min(saved.i || 0, item.chapters.length - 1), p: saved.p ?? -1, s: 0, playing: false, current: null }; if (autoplay) this.speakStart(); else this.updateTts(); return; }
     this.go(Math.min(saved.i || 0, item.tracks.length - 1), saved.t || 0, autoplay);
   }
 
   go(i, t = 0, autoplay = true) {
+    if (this.item.kind === 'tts') { this.tts.ch = i; this.tts.p = -1; this.tts.s = 0; this.renderTrack(); if (autoplay || this.tts.playing) this.speakStart(); else this.updateTts(); return; }
     const track = this.item.tracks[i];
     if (!track) return;
     this.index = i;
@@ -133,6 +175,7 @@ export class Player {
 
   toggle() {
     if (!this.item) return;
+    if (this.item.kind === 'tts') { if (this.tts.playing) { this.stopSpeaking(); this.save(true); } else this.speakStart(); return; }
     if (this.playing) this.audio.pause();
     else if (!this.audio.getAttribute('src')) this.go(this.index, 0, true);
     else this.audio.play().catch(() => {});
@@ -140,28 +183,40 @@ export class Player {
 
   next(auto = false) {
     if (!this.item) return;
+    if (this.item.kind === 'tts') { if (this.tts.ch < this.item.chapters.length - 1) this.go(this.tts.ch + 1, 0, this.tts.playing); return; }
     if (this.index < this.item.tracks.length - 1) this.go(this.index + 1, 0, true);
     else if (auto) { this.setPlaying(false); this.save(true, { done: true }); this.toast(`Fim de “${this.item.title}”.`); }
   }
 
   prev() {
     if (!this.item) return;
+    if (this.item.kind === 'tts') { if (this.tts.p > 0) { this.tts.p = 0; this.tts.s = 0; this.restartIfPlaying(); } else if (this.tts.ch > 0) this.go(this.tts.ch - 1, 0, this.tts.playing); return; }
     if (this.audio.currentTime > 5 || this.index === 0) this.audio.currentTime = 0;
     else this.go(this.index - 1, 0, true);
   }
 
-  skip(s) { if (this.item && isFinite(this.audio.duration)) this.audio.currentTime = Math.max(0, Math.min(this.audio.duration, this.audio.currentTime + s)); }
+  skip(s) {
+    if (this.item && this.item.kind === 'tts') {
+      const n = this.item.chapters[this.tts.ch].paragraphs.length;
+      this.tts.p = Math.max(-1, Math.min(n - 1, this.tts.p + (s > 0 ? 1 : -1)));
+      this.tts.s = 0;
+      this.restartIfPlaying();
+      return;
+    }
+    if (this.item && isFinite(this.audio.duration)) this.audio.currentTime = Math.max(0, Math.min(this.audio.duration, this.audio.currentTime + s)); }
 
   cycleSpeed() {
     const i = SPEEDS.indexOf(this.speed);
     this.speed = SPEEDS[(i + 1) % SPEEDS.length];
     this.audio.playbackRate = this.speed;
+    if (this.item && this.item.kind === 'tts') this.restartIfPlaying();
     const b = this.root.querySelector('[data-pl="speed"]');
     if (b) b.textContent = `${String(this.speed).replace('.', ',')}×`;
   }
 
   close() {
     this.save(true);
+    this.stopSpeaking();
     this.audio.pause();
     this.audio.removeAttribute('src');
     this.item = null;
@@ -182,7 +237,9 @@ export class Player {
     const now = Date.now();
     if (!force && now - this.lastSave < 30000) return;
     this.lastSave = now;
-    const pos = { i: this.index, t: Math.floor(this.audio.currentTime || 0), at: new Date().toISOString(), ...extra };
+    const pos = this.item.kind === 'tts'
+      ? { i: this.tts.ch, p: this.tts.p, at: new Date().toISOString(), ...extra }
+      : { i: this.index, t: Math.floor(this.audio.currentTime || 0), at: new Date().toISOString(), ...extra };
     try { localStorage.setItem(POS_PREFIX + this.item.key, JSON.stringify(pos)); } catch (e) { /* storage off */ }
     if (this.item.onSave) this.item.onSave(pos);
   }
@@ -204,18 +261,19 @@ export class Player {
     this.root.innerHTML = `
       <div class="pl-disc${this.playing ? ' is-spinning' : ''}" aria-hidden="true">${DISC}<span class="pl-label" style="background:${esc(it.color || '#7a2e22')}">${label}</span></div>
       <div class="pl-main">
-        <p class="pl-kicker">Ouvindo${it.who ? ` · de ${esc(it.who)}` : ''}</p>
+        <p class="pl-kicker">${it.kind === 'tts' ? 'Narrando com a voz do navegador' : `Ouvindo${it.who ? ` · de ${esc(it.who)}` : ''}`}</p>
         <p class="pl-title serif">${esc(it.title)}</p>
         <div class="pl-track-row">${it.tracks.length > 1
           ? `<label class="sr" for="pl-track">Capítulo</label><select id="pl-track" data-track-select>${it.tracks.map((t, i) => `<option value="${i}">${esc(t.title)}</option>`).join('')}</select>`
           : `<span class="pl-track">${esc(it.tracks[0].title)}</span>`}</div>
+        ${it.kind === 'tts' ? '<p class="pl-line" data-line aria-live="off"></p>' : ''}
         <div class="pl-seek"><span data-cur>0:00</span><input type="range" min="0" max="1000" value="0" data-seek aria-label="Posição no capítulo"><span data-dur>0:00</span></div>
       </div>
       <div class="pl-controls">
         <button type="button" class="pl-btn" data-pl="prev" aria-label="Capítulo anterior"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4v12M16 4L7 10l9 6z"/></svg></button>
-        <button type="button" class="pl-btn" data-pl="back" aria-label="Voltar 30 segundos"><span>−30</span></button>
+        <button type="button" class="pl-btn" data-pl="back" aria-label="${it.kind === 'tts' ? 'Parágrafo anterior' : 'Voltar 30 segundos'}"><span>${it.kind === 'tts' ? '−¶' : '−30'}</span></button>
         <button type="button" class="pl-btn pl-play" data-pl="toggle" aria-label="Tocar"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l11 6-11 6z"/></svg></button>
-        <button type="button" class="pl-btn" data-pl="fwd" aria-label="Avançar 30 segundos"><span>+30</span></button>
+        <button type="button" class="pl-btn" data-pl="fwd" aria-label="${it.kind === 'tts' ? 'Próximo parágrafo' : 'Avançar 30 segundos'}"><span>${it.kind === 'tts' ? '+¶' : '+30'}</span></button>
         <button type="button" class="pl-btn" data-pl="next" aria-label="Próximo capítulo"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15 4v12M4 4l9 6-9 6z"/></svg></button>
         <button type="button" class="pl-btn pl-speed" data-pl="speed" aria-label="Velocidade">${String(this.speed).replace('.', ',')}×</button>
         <button type="button" class="pl-btn pl-close" data-pl="close" aria-label="Fechar o player"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
@@ -225,7 +283,86 @@ export class Player {
 
   renderTrack() {
     const sel = this.root.querySelector('[data-track-select]');
-    if (sel) sel.value = String(this.index);
+    if (sel) sel.value = String(this.item && this.item.kind === 'tts' ? this.tts.ch : this.index);
+  }
+
+  /* ---------------- narration with the browser's voice ---------------- */
+
+  voice() {
+    const all = ttsVoices();
+    const want = this.item.voiceURI || preferredVoice();
+    return all.find((v) => v.voiceURI === want) || all[0] || null;
+  }
+
+  stopSpeaking() {
+    if (this.tts) { this.tts.playing = false; this.tts.current = null; }
+    if (canSpeak()) speechSynthesis.cancel();
+    if (this.item && this.item.kind === 'tts') this.setPlaying(false);
+  }
+
+  restartIfPlaying() {
+    if (this.tts && this.tts.playing) { this.tts.current = null; speechSynthesis.cancel(); setTimeout(() => this.speakNext(), 60); }
+    this.updateTts();
+  }
+
+  speakStart() {
+    if (!canSpeak()) { this.toast('Este navegador não tem voz para ler em voz alta. Tente o Microsoft Edge ou o Chrome.'); return; }
+    if (!ttsVoices().length) this.toast('Não achamos voz em português neste aparelho; vamos usar a voz padrão.');
+    this.tts.playing = true;
+    this.setPlaying(true);
+    speechSynthesis.cancel();
+    setTimeout(() => this.speakNext(), 60);
+  }
+
+  speakNext() {
+    const t = this.tts;
+    if (!t || !t.playing || !this.item) return;
+    const chs = this.item.chapters;
+    const ch = chs[t.ch];
+    if (!ch) { this.stopSpeaking(); return; }
+    if (t.p >= ch.paragraphs.length) {
+      if (t.ch < chs.length - 1) { t.ch++; t.p = -1; t.s = 0; this.renderTrack(); this.save(true); return this.speakNext(); }
+      this.stopSpeaking(); this.save(true, { done: true }); this.toast(`Fim de “${this.item.title}”.`); return;
+    }
+    const text = t.p === -1 ? ch.title : ch.paragraphs[t.p];
+    const chunks = sentences(text);
+    if (t.s >= chunks.length) { t.p++; t.s = 0; return this.speakNext(); }
+    const u = new SpeechSynthesisUtterance(chunks[t.s]);
+    const v = this.voice();
+    if (v) u.voice = v;
+    u.lang = v ? v.lang : 'pt-BR';
+    u.rate = this.speed;
+    u.onend = () => {
+      if (t.current !== u) return;
+      t.s++;
+      this.save();
+      // a short breath between paragraphs, a longer one after a chapter title
+      const pause = t.s >= chunks.length ? (t.p === -1 ? 900 : 350) : 0;
+      setTimeout(() => this.speakNext(), pause);
+    };
+    u.onerror = (e) => {
+      if (t.current !== u || e.error === 'interrupted' || e.error === 'canceled') return;
+      this.stopSpeaking();
+      this.toast('A voz do navegador parou. Clique em tocar para continuar.');
+    };
+    t.current = u;
+    speechSynthesis.speak(u);
+    this.updateTts(chunks[t.s]);
+  }
+
+  updateTts(line = null) {
+    if (!this.item || this.item.kind !== 'tts') return;
+    const t = this.tts;
+    const ch = this.item.chapters[t.ch];
+    const n = ch.paragraphs.length;
+    const el = this.root.querySelector('[data-line]');
+    if (el) el.textContent = line || (t.p === -1 ? ch.title : (ch.paragraphs[t.p] || '').slice(0, 160));
+    const cur = this.root.querySelector('[data-cur]');
+    if (cur) cur.textContent = `¶ ${Math.max(0, t.p) + 1}/${n}`;
+    const dur = this.root.querySelector('[data-dur]');
+    if (dur) dur.textContent = `${Math.round((Math.max(0, t.p) / Math.max(1, n)) * 100)}%`;
+    const seek = this.root.querySelector('[data-seek]');
+    if (seek && document.activeElement !== seek) seek.value = String(Math.round((Math.max(0, t.p) / Math.max(1, n)) * 1000));
   }
 
   setPlaying(on) {
@@ -240,6 +377,7 @@ export class Player {
   }
 
   tick() {
+    if (this.item && this.item.kind === 'tts') return;
     const a = this.audio;
     const cur = this.root.querySelector('[data-cur]');
     if (!cur) return;

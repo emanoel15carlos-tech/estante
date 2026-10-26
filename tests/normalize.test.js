@@ -177,3 +177,19 @@ test('audiobook links: Drive files stream, folders open in Drive, names are opti
   assert.equal(playable('https://archive.org/download/x/cap2_64kb.mp3').src, 'https://archive.org/download/x/cap2_64kb.mp3');
   assert.equal(playable('javascript:alert(1)'), null);
 });
+
+test('PDF reading: chapters, no running headers or page numbers, hyphenation undone', async () => {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { itemsToLines, buildChapters, sentences } = await import('../src/lib/pdftext.js');
+  const { readFileSync } = await import('node:fs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(new URL('./fixtures/livro-teste.pdf', import.meta.url))), verbosity: 0 }).promise;
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) pages.push({ lines: itemsToLines((await (await doc.getPage(i)).getTextContent()).items) });
+  const ch = buildChapters(pages, []);
+  assert.deepEqual(ch.map((c) => c.title), ['Capítulo 1', 'Capítulo 2', 'Capítulo 3']);
+  const all = JSON.stringify(ch);
+  assert.equal(all.includes('Autora Exemplo'), false);
+  assert.ok(ch[0].paragraphs[0].includes('O vento batia nas janelas'));
+  assert.ok(ch[0].paragraphs.includes('— Quem está aí? — perguntou ela, com a voz baixa.'));
+  assert.ok(sentences('a'.repeat(500)).every((s) => s.length <= 221));
+});

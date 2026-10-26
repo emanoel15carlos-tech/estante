@@ -1036,3 +1036,12 @@ body.has-player { padding-bottom: 104px; }
 .audio-mark { position: absolute; top: 24px; right: 3px; width: 10px; height: 8px; border: 1.6px solid currentColor; border-bottom: 0; border-radius: 6px 6px 0 0; opacity: .85; }
 .audio-mark::before, .audio-mark::after { content: ''; position: absolute; bottom: -4px; width: 3px; height: 5px; background: currentColor; border-radius: 1px; }
 .audio-mark::before { left: -2px; } .audio-mark::after { right: -2px; }
+
+/* narration with the browser's voice */
+.pl-line { margin: 2px 0; font: italic 13px/1.4 var(--serif); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.narrate { margin: 0 0 18px; }
+.narr-pick { display: inline-flex; margin: 6px 0 4px; }
+.narr-status { min-height: 1.2em; margin: 4px 0; font-size: 14px; color: var(--ink-2); }
+.narr-opts { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin-top: 6px; }
+.narr-voice { min-width: min(100%, 280px); }
+.narr-disc { background: radial-gradient(circle, #3d6797 0 26%, #111 27% 30%, #1b1b1b 31% 100%); }

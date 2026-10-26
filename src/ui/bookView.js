@@ -5,7 +5,8 @@ import * as store from '../lib/store.js';
 import * as cloud from '../lib/cloud.js';
 import * as social from './social.js';
 import { SOURCE_LABEL, archiveTracks, bookInsights, librivoxRecordings, portugueseEditions, readerLists, similarBooks } from '../lib/apis.js';
-import { parseTracks } from './player.js';
+import { canSpeak, parseTracks, preferredVoice, setPreferredVoice, whenVoices } from './player.js';
+import { deleteNarration, getNarration, saveNarration } from '../lib/localdb.js';
 import { esc, hostOf, normalizeUrl, parseDrive, uid } from '../lib/util.js';
 
 const STATUS = [
@@ -191,6 +192,7 @@ export class BookView {
       </div>`;
     this.loadInsights(b);
     this.loadHouseReviews(b);
+    if (tab === 'ouvir') { this.loadLibrivox(); this.renderNarrate(); }
   }
 
   /* ---------------- bookmark: the page you are on ---------------- */
@@ -326,8 +328,96 @@ export class BookView {
         <span class="hint-line">O botão só funciona com o FadeBooks aberto neste computador.</span>
       </details>`;
     }
+    if (!ro) html += '<div class="narrate" data-narrate><p class="bv-loading">Preparando a narração…</p></div>';
     html += '<div class="librivox"><h3 class="bv-h">Gratuito, em domínio público</h3><p class="bv-loading">Procurando gravações no LibriVox…</p></div>';
     return html;
+  }
+
+  /* ---- narrate a PDF with the browser's voice ---- */
+
+  async renderNarrate() {
+    const box = this.info.querySelector('[data-narrate]');
+    const b = this.book;
+    if (!box || !b) return;
+    if (!canSpeak()) {
+      box.innerHTML = '<h3 class="bv-h">Narrar o PDF</h3><p class="bv-text">Este navegador não lê em voz alta. No computador, use o Microsoft Edge (vozes mais naturais) ou o Chrome.</p>';
+      return;
+    }
+    const [saved, voices] = await Promise.all([getNarration(b.id), whenVoices()]);
+    if (this.id !== b.id || !box.isConnected) return;
+    const want = preferredVoice();
+    const natural = voices.some((v) => /natural|online|neural/i.test(v.name));
+    const voiceSel = voices.length
+      ? `<label class="field narr-voice"><span class="field-label">Voz</span><select data-narr-voice>${voices.map((v) => `<option value="${esc(v.voiceURI)}"${v.voiceURI === want ? ' selected' : ''}>${esc(v.name.replace(/^Microsoft /, '').replace(/ - .*$/, ''))} · ${esc(v.lang)}</option>`).join('')}</select></label>
+         <button type="button" class="link-btn" data-act="narr-test">Ouvir amostra</button>`
+      : '<p class="bv-note">Não achamos voz em português neste aparelho. Ele vai ler com a voz padrão.</p>';
+    const tip = natural ? '' : '<p class="bv-note">Dica: no Microsoft Edge as vozes em português são neurais (Francisca, Thalita, Antonio) e soam bem mais naturais.</p>';
+    if (saved) {
+      const pos = this.narrationPos(b);
+      const ch = saved.chapters[Math.min((pos && pos.i) || 0, saved.chapters.length - 1)];
+      box.innerHTML = `<h3 class="bv-h">Narração do PDF</h3>
+        <div class="audio-card is-own narr-card">
+          <span class="ac-disc narr-disc" aria-hidden="true"></span>
+          <div class="ac-main">
+            <p class="ac-kicker">${esc(saved.file || 'PDF')} · ${saved.chapters.length} ${saved.chapters.length === 1 ? 'parte' : 'capítulos'} · ${(() => { const min = Math.max(1, Math.round(saved.chars / 900)); return min < 60 ? `~${min} min` : `~${Math.round(min / 60)} h`; })()}</p>
+            <p class="ac-title serif">${pos && (pos.i || pos.p > 0) ? `Parou em “${esc(ch.title)}”` : 'Pronta para começar'}</p>
+            <div class="row"><button type="button" class="btn btn-solid btn-sm" data-act="narr-play">▶ ${pos && (pos.i || pos.p > 0) ? 'Continuar' : 'Narrar'}</button>
+            <button type="button" class="link-btn" data-act="narr-new">Trocar PDF</button>
+            <button type="button" class="link-btn danger" data-act="narr-delete">Apagar texto</button></div>
+          </div>
+        </div>
+        <div class="narr-opts">${voiceSel}</div>${tip}`;
+      return;
+    }
+    box.innerHTML = `<h3 class="bv-h">Narrar o PDF</h3>
+      <p class="bv-text">Mande o PDF do livro e a Estante lê em voz alta, capítulo por capítulo, com a voz do navegador. Grátis e sem conta: o PDF é lido aqui mesmo e o texto fica só neste aparelho.</p>
+      <label class="btn file-btn narr-pick">Escolher o PDF<input type="file" accept="application/pdf,.pdf" data-narr-file></label>
+      <p class="narr-status" data-narr-status aria-live="polite"></p>
+      <div class="narr-opts">${voiceSel}</div>${tip}`;
+  }
+
+  narrationPos(b) {
+    try { return JSON.parse(localStorage.getItem('estante:ouvindo:pdf:' + b.id) || 'null'); } catch (e) { return null; }
+  }
+
+  async onNarrateFile(input) {
+    const file = input.files && input.files[0];
+    const b = this.book;
+    const status = this.info.querySelector('[data-narr-status]');
+    if (!file || !b) return;
+    if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { status.textContent = 'Escolha um arquivo PDF.'; return; }
+    status.textContent = 'Lendo o PDF…';
+    let book;
+    try {
+      const { readPdf } = await import('../lib/pdftext.js');
+      book = await readPdf(file, (f) => { status.textContent = `Lendo o PDF… ${Math.round(f * 100)}%`; });
+    } catch (e) {
+      status.textContent = 'Não deu para ler este PDF. Ele pode estar protegido ou corrompido.';
+      return;
+    }
+    if (!book.chars || book.chars < 200) { status.textContent = 'Este PDF não tem texto selecionável (parece ser imagem escaneada). Para esses, use o FadeBooks com OCR.'; return; }
+    const ok = await saveNarration(b.id, { file: file.name, chapters: book.chapters, chars: book.chars, pages: book.pages, at: new Date().toISOString() });
+    try { localStorage.removeItem('estante:ouvindo:pdf:' + b.id); } catch (e) { /* storage off */ }
+    if (!ok) { this.narrationCache = { id: b.id, chapters: book.chapters }; status.textContent = 'Lido! (Este navegador não deixou guardar o texto, então ele vale só até fechar a página.)'; }
+    this.flash(`PDF lido: ${book.chapters.length} ${book.chapters.length === 1 ? 'parte' : 'capítulos'}. Clique em Narrar.`);
+    if (ok) this.renderNarrate();
+    else this.playNarration(book.chapters);
+  }
+
+  async playNarration(chapters = null) {
+    const b = this.book;
+    if (!b || !this.player) return;
+    if (!chapters) {
+      const saved = await getNarration(b.id);
+      chapters = saved ? saved.chapters : (this.narrationCache && this.narrationCache.id === b.id ? this.narrationCache.chapters : null);
+    }
+    if (!chapters || !chapters.length) return;
+    const sel = this.info.querySelector('[data-narr-voice]');
+    this.player.load({
+      kind: 'tts', key: 'pdf:' + b.id, title: b.title, author: (b.authors || [])[0] || '',
+      cover: b.cover && !String(b.cover).startsWith('data:') ? b.cover : null, color: b.color,
+      chapters, voiceURI: sel ? sel.value : preferredVoice(),
+    });
   }
 
   renderListen() {
@@ -335,6 +425,7 @@ export class BookView {
     if (!p || !this.book) return;
     p.innerHTML = this.listenHtml(this.book);
     this.renderHouseAudio();
+    this.renderNarrate();
     if (this.lvList) this.renderLibrivox(this.lvList); else this.loadLibrivox(true);
   }
 
@@ -678,7 +769,7 @@ export class BookView {
     const p = this.panel(id);
     if (p && !this.reduce) gsap.fromTo(p, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power3.out' });
     if (id === 'parecidos') this.loadSimilar();
-    if (id === 'ouvir') this.loadLibrivox();
+    if (id === 'ouvir') { this.loadLibrivox(); this.renderNarrate(); }
   }
 
   async loadInsights(b) {
@@ -1063,6 +1154,19 @@ export class BookView {
     else if (act === 'start-reading') { store.updateBook(this.id, { status: 'lendo' }); this.setStatusUi('lendo'); const i = this.info.querySelector('[data-page]'); if (i) i.focus(); }
     else if (act === 'drive-remove') { store.updateBook(this.id, { drive: null, driveShared: false }, { drive: true }); this.refreshDrive(); }
     else if (act === 'propose') this.showPropose();
+    else if (act === 'narr-play') this.playNarration();
+    else if (act === 'narr-new') { const box = this.info.querySelector('[data-narrate]'); deleteNarration(this.id).then(() => this.renderNarrate()); if (box) box.innerHTML = '<p class="bv-loading">…</p>'; }
+    else if (act === 'narr-delete') {
+      if (el.dataset.armed !== '1') { el.dataset.armed = '1'; el.textContent = 'Confirmar'; return; }
+      deleteNarration(this.id).then(() => { try { localStorage.removeItem('estante:ouvindo:pdf:' + this.id); } catch (e) { /* off */ } this.renderNarrate(); });
+    }
+    else if (act === 'narr-test') {
+      const sel = this.info.querySelector('[data-narr-voice]');
+      const u = new SpeechSynthesisUtterance(`Esta é a voz que vai ler ${this.book.title} para você.`);
+      const v = speechSynthesis.getVoices().find((x) => sel && x.voiceURI === sel.value);
+      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'pt-BR';
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    }
     else if (act === 'audio-edit') { this.editingAudio = true; this.renderListen(); }
     else if (act === 'audio-cancel') { this.editingAudio = false; this.renderListen(); }
     else if (act === 'audio-remove') {
@@ -1075,6 +1179,8 @@ export class BookView {
   }
 
   onChange(e) {
+    if (e.target.matches('[data-narr-file]')) { this.onNarrateFile(e.target); return; }
+    if (e.target.matches('[data-narr-voice]')) { setPreferredVoice(e.target.value); return; }
     if (e.target.matches('[data-links-share]')) {
       store.updateBook(this.id, { linksPrivate: !e.target.checked });
       this.flash(e.target.checked ? 'Quem mora com você vê os links e o arquivo deste livro.' : 'Os links e o arquivo deste livro ficaram só com você.');
